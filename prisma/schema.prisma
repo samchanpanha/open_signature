@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents  Document[]
+  auditLogs  AuditLog[]
+}
+
+model Document {
+  id              String   @id @default(cuid())
+  title           String
+  originalPdfPath String
+  signedPdfPath   String?
+  status          String   @default("Draft") // Draft, Sent, Signing, Completed
+  ownerId         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  owner    User    @relation(fields: [ownerId], references: [id])
+  signers  Signer[]
+  fields   DocumentField[]
+  auditLogs AuditLog[]
+}
+
+model Signer {
+  id         String    @id @default(cuid())
+  email      String
+  name       String
+  order      Int       @default(1)
+  signedAt   DateTime?
+  token      String    @unique
+  documentId String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  document Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  fields   DocumentField[]
+}
+
+model DocumentField {
+  id         String   @id @default(cuid())
+  type       String   // signature, date, text
+  pageNumber Int
+  x          Float
+  y          Float
+  width      Float
+  height     Float
+  value      String?
+  signerId   String?
+  documentId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  signer   Signer?  @relation(fields: [signerId], references: [id], onDelete: SetNull)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  ipAddress  String?
+  userAgent  String?
+  details    String?
+  documentId String?
+  userId     String?
+  signerId   String?
+  createdAt  DateTime @default(now())
+
+  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
