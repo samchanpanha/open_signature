@@ -34,6 +34,58 @@ export const authApi = {
   me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
 };
 
+// Organizations
+export interface OrgListItem {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+  memberCount: number;
+  documentCount: number;
+  createdAt: string;
+}
+
+export interface OrgDetail extends OrgListItem {
+  ownerId: string;
+  members: {
+    id: string;
+    role: string;
+    joinedAt: string;
+    user: { id: string; email: string; name: string };
+  }[];
+}
+
+export interface OrgMember {
+  id: string;
+  role: string;
+  joinedAt: string;
+  user: { id: string; email: string; name: string };
+}
+
+export const orgApi = {
+  list: () => request<OrgListItem[]>('/api/organizations'),
+  get: (id: string) => request<OrgDetail>(`/api/organizations/${id}`),
+  create: (name: string) =>
+    request<OrgListItem>('/api/organizations', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  delete: (id: string) => request(`/api/organizations/${id}`, { method: 'DELETE' }),
+  listMembers: (orgId: string) => request<OrgMember[]>(`/api/organizations/${orgId}/members`),
+  inviteMember: (orgId: string, email: string, role?: string) =>
+    request<OrgMember>(`/api/organizations/${orgId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  updateMemberRole: (orgId: string, memberId: string, role: string) =>
+    request<OrgMember>(`/api/organizations/${orgId}/members/${memberId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+  removeMember: (orgId: string, memberId: string) =>
+    request(`/api/organizations/${orgId}/members/${memberId}`, { method: 'DELETE' }),
+};
+
 // Documents
 export interface DocumentListItem {
   id: string;
@@ -46,6 +98,7 @@ export interface DocumentListItem {
   ccRecipients?: { name: string; email: string }[];
   rejectionReason?: string | null;
   rejectedBy?: string | null;
+  organizationId?: string | null;
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -65,6 +118,8 @@ export interface DocumentDetail extends DocumentListItem {
   fields: {
     id: string;
     type: string;
+    label?: string | null;
+    required: boolean;
     pageNumber: number;
     x: number;
     y: number;
@@ -84,6 +139,8 @@ export interface SignerInfo {
   fields: {
     id: string;
     type: string;
+    label?: string | null;
+    required: boolean;
     pageNumber: number;
     x: number;
     y: number;
@@ -94,7 +151,10 @@ export interface SignerInfo {
 }
 
 export const documentsApi = {
-  list: () => request<DocumentListItem[]>('/api/documents'),
+  list: (orgId?: string | null) => {
+    const query = orgId !== undefined ? `?orgId=${orgId}` : '';
+    return request<DocumentListItem[]>(`/api/documents${query}`);
+  },
   get: (id: string) => request<DocumentDetail>(`/api/documents/${id}`),
   create: (formData: FormData) =>
     fetch('/api/documents', {
@@ -140,12 +200,12 @@ export const documentsApi = {
 
 // Fields
 export const fieldsApi = {
-  create: (documentId: string, field: { type: string; pageNumber: number; x: number; y: number; width: number; height: number; signerId?: string }) =>
+  create: (documentId: string, field: { type: string; pageNumber: number; x: number; y: number; width: number; height: number; signerId?: string; label?: string; required?: boolean }) =>
     request('/api/fields', {
       method: 'POST',
       body: JSON.stringify({ documentId, ...field }),
     }),
-  update: (id: string, data: { value?: string; signerId?: string | null }) =>
+  update: (id: string, data: { value?: string; signerId?: string | null; x?: number; y?: number; width?: number; height?: number; label?: string | null; required?: boolean }) =>
     request(`/api/fields/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -198,20 +258,4 @@ export const signaturesApi = {
     }),
   delete: (id: string) =>
     request(`/api/signatures?id=${id}`, { method: 'DELETE' }),
-};
-
-// PDF pages (rendered as images)
-export const pdfApi = {
-  getPages: (documentId: string) =>
-    fetch(`/api/documents/${documentId}/pages`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    }).then(async (res) => {
-      if (!res.ok) throw new Error('Failed to load pages');
-      return res.json() as Promise<{ pages: { pageNumber: number; dataUrl: string; width: number; height: number }[] }>;
-    }),
-  getSigningPages: (token: string) =>
-    fetch(`/api/sign/${token}/pages`).then(async (res) => {
-      if (!res.ok) throw new Error('Failed to load pages');
-      return res.json() as Promise<{ pages: { pageNumber: number; dataUrl: string; width: number; height: number }[] }>;
-    }),
 };

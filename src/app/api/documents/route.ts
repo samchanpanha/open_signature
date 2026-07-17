@@ -18,8 +18,19 @@ export async function GET(req: NextRequest) {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    const { searchParams } = new URL(req.url);
+    const orgId = searchParams.get('orgId');
+
+    // Build where clause: must be owned by user, optionally filtered by org
+    const whereClause: any = { ownerId: payload.userId as string };
+    if (orgId === 'null') {
+      whereClause.organizationId = null;
+    } else if (orgId) {
+      whereClause.organizationId = orgId;
+    }
+
     const documents = await db.document.findMany({
-      where: { ownerId: payload.userId as string },
+      where: whereClause,
       include: {
         _count: { select: { signers: true } },
         signers: { where: { signedAt: { not: null } }, select: { id: true } },
@@ -63,12 +74,26 @@ export async function POST(req: NextRequest) {
     const filePath = path.join(UPLOADS_DIR, `${fileId}.pdf`);
     await writeFile(filePath, buffer);
 
+    // Check for orgId in form data
+    const orgIdStr = (formData.get('organizationId') as string) || null;
+
+    // Verify org membership if orgId provided
+    if (orgIdStr) {
+      const memberCheck = await db.organizationMember.findFirst({
+        where: { orgId: orgIdStr, userId: payload.userId as string },
+      });
+      if (!memberCheck) {
+        return NextResponse.json({ error: 'Not a member of this organization' }, { status: 403 });
+      }
+    }
+
     const document = await db.document.create({
       data: {
         title,
         originalPdfPath: `${fileId}.pdf`,
         ownerId: payload.userId as string,
         status: 'Draft',
+        ...(orgIdStr ? { organizationId: orgIdStr } : {}),
       },
     });
 

@@ -1,0 +1,502 @@
+     1→  1633→                    size="icon"
+     2→  1634→                    className="h-5 w-5"
+     3→  1635→                    onClick={(e) => { e.stopPropagation(); setTempSigners(tempSigners.filter((_, j) => j !== i)); }}
+     4→  1636→                  >
+     5→  1637→                    <X className="w-3 h-3" />
+     6→  1638→                  </Button>
+     7→  1639→                </div>
+     8→  1640→              ))}
+     9→  1641→              <div className="space-y-1.5">
+    10→  1642→                <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs" />
+    11→  1643→                <Input placeholder="Email" type="email" value={newSignerEmail} onChange={(e) => setNewSignerEmail(e.target.value)} className="h-8 text-xs" onKeyDown={(e) => e.key === 'Enter' && addSigner()} />
+    12→  1644→                <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={addSigner} disabled={!newSignerName.trim() || !newSignerEmail.trim()}>
+    13→  1645→                  <Plus className="w-3 h-3 mr-1" /> Add Signer
+    14→  1646→                </Button>
+    15→  1647→              </div>
+    16→  1648→            </div>
+    17→  1649→
+    18→  1650→            <Separator />
+    19→  1651→
+    20→  1652→            {/* CC Recipients */}
+    21→  1653→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CC Recipients</h3>
+    22→  1654→            <div className="space-y-2">
+    23→  1655→              {ccRecipients.map((cc, i) => (
+    24→  1656→                <div key={i} className="flex items-center gap-2 text-xs p-1.5 bg-muted rounded-md">
+    25→  1657→                  <div className="w-3 h-3 rounded-full bg-muted-foreground/30 shrink-0" />
+    26→  1658→                  <div className="min-w-0 flex-1 truncate">
+    27→  1659→                    <span className="font-medium">{cc.name}</span>
+    28→  1660→                    <span className="text-muted-foreground ml-1">({cc.email})</span>
+    29→  1661→                  </div>
+    30→  1662→                  <button
+    31→  1663→                    className="text-muted-foreground hover:text-destructive"
+    32→  1664→                    onClick={() => setCcRecipients(ccRecipients.filter((_, j) => j !== i))}
+    33→  1665→                  >
+    34→  1666→                    <X className="w-3 h-3" />
+    35→  1667→                  </button>
+    36→  1668→                </div>
+    37→  1669→              ))}
+    38→  1670→              <div className="space-y-1.5">
+    39→  1671→                <Input placeholder="CC Name" value={newCcName} onChange={(e) => setNewCcName(e.target.value)} className="h-7 text-xs" />
+    40→  1672→                <Input placeholder="CC Email" type="email" value={newCcEmail} onChange={(e) => setNewCcEmail(e.target.value)} className="h-7 text-xs" onKeyDown={(e) => e.key === 'Enter' && addCcRecipient()} />
+    41→  1673→                <Button variant="outline" size="sm" className="w-full h-6 text-xs" onClick={addCcRecipient} disabled={!newCcName.trim() || !newCcEmail.trim()}>
+    42→  1674→                  <Plus className="w-3 h-3 mr-1" /> Add CC
+    43→  1675→                </Button>
+    44→  1676→              </div>
+    45→  1677→            </div>
+    46→  1678→
+    47→  1679→            <Separator />
+    48→  1680→
+    49→  1681→            {/* Expiry Date */}
+    50→  1682→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry Date</h3>
+    51→  1683→            <Input
+    52→  1684→              type="date"
+    53→  1685→              value={expiryDate}
+    54→  1686→              onChange={(e) => setExpiryDate(e.target.value)}
+    55→  1687→              className="h-8 text-xs"
+    56→  1688→              min={new Date().toISOString().split('T')[0]}
+    57→  1689→            />
+    58→  1690→            {expiryDate && (
+    59→  1691→              <p className="text-xs text-muted-foreground">
+    60→  1692→                Expires: {formatDateOnly(expiryDate)}
+    61→  1693→              </p>
+    62→  1694→            )}
+    63→  1695→
+    64→  1696→            {/* Load Template */}
+    65→  1697→            {templates.length > 0 && (
+    66→  1698→              <>
+    67→  1699→                <Separator />
+    68→  1700→                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Templates</h3>
+    69→  1701→                <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={() => setLoadTemplateDialog(true)}>
+    70→  1702→                  <BookmarkPlus className="w-3 h-3 mr-1" /> Load Template
+    71→  1703→                </Button>
+    72→  1704→              </>
+    73→  1705→            )}
+    74→  1706→          </div>
+    75→  1707→
+    76→  1708→          {/* Mobile toolbar */}
+    77→  1709→          <div className="lg:hidden fixed bottom-16 left-0 right-0 bg-background border-t z-40 p-2">
+    78→  1710→            <div className="flex gap-2 justify-center">
+    79→  1711→              {[
+    80→  1712→                { type: 'signature' as const, icon: PenLine, label: 'Sig' },
+    81→  1713→                { type: 'date' as const, icon: CalendarDays, label: 'Date' },
+    82→  1714→                { type: 'text' as const, icon: Type, label: 'Text' },
+    83→  1715→              ].map(tool => (
+    84→  1716→                <Button
+    85→  1717→                  key={tool.type}
+    86→  1718→                  variant={activeTool === tool.type ? 'default' : 'outline'}
+    87→  1719→                  size="sm"
+    88→  1720→                  className={`gap-1 ${activeTool === tool.type ? 'bg-emerald-600' : ''}`}
+    89→  1721→                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+    90→  1722→                >
+    91→  1723→                  <tool.icon className="w-4 h-4" /> {tool.label}
+    92→  1724→                </Button>
+    93→  1725→              ))}
+    94→  1726→            </div>
+    95→  1727→          </div>
+    96→  1728→
+    97→  1729→          {/* PDF Area */}
+    98→  1730→          <div className="flex-1 overflow-auto p-4 space-y-6 pb-24 lg:pb-4">
+    99→  1731→            {pdfLoading ? (
+   100→  1732→              <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+   101→  1733→            ) : (
+   102→  1734→              pdfPages.map((page, idx) => {
+   103→  1735→                const pageFields = placedFields.filter(f => f.pageNumber === page.pageNumber);
+   104→  1736→                return (
+   105→  1737→                  <div key={idx} className="space-y-2">
+   106→  1738→                    <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {pdfPages.length}</p>
+   107→  1739→                    <div
+   108→  1740→                      className={`relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white ${activeTool ? 'cursor-crosshair' : ''}`}
+   109→  1741→                      style={{ maxWidth: 612 }}
+   110→  1742→                      onClick={(e) => {
+   111→  1743→                        const target = e.target as HTMLElement;
+   112→  1744→                        if (target.closest('[data-field]')) return;
+   113→  1745→                        handlePageClick(e, idx);
+   114→  1746→                      }}
+   115→  1747→                    >
+   116→  1748→                      <img src={page.dataUrl} alt={`Page ${page.pageNumber}`} className="w-full h-auto" draggable={false} />
+   117→  1749→                      {pageFields.map(field => (
+   118→  1750→                        <div
+   119→  1751→                          key={field.id}
+   120→  1752→                          data-field
+   121→  1753→                          className={`absolute border-2 rounded flex items-center justify-center transition-all group/field ${
+   122→  1754→                            field.type === 'signature' ? 'border-emerald-400 bg-emerald-50/70' :
+   123→  1755→                            field.type === 'date' ? 'border-amber-400 bg-amber-50/70' :
+   124→  1756→                            'border-neutral-400 bg-neutral-50/70'
+   125→  1757→                          } ${field.signerColor ? 'ring-2' : ''}`}
+   126→  1758→                          style={{
+   127→  1759→                            left: `${(field.x / 612) * 100}%`,
+   128→  1760→                            top: `${(field.y / 792) * 100}%`,
+   129→  1761→                            width: `${(field.width / 612) * 100}%`,
+   130→  1762→                            height: `${(field.height / 792) * 100}%`,
+   131→  1763→                            ringColor: field.signerColor,
+   132→  1764→                          }}
+   133→  1765→                          onMouseDown={(e) => handleFieldDragStart(field.id, e)}
+   134→  1766→                        >
+   135→  1767→                          <div className="flex items-center gap-1 px-1">
+   136→  1768→                            {field.type === 'signature' && <PenLine className="w-3 h-3 text-emerald-600" />}
+   137→  1769→                            {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
+   138→  1770→                            {field.type === 'text' && <Type className="w-3 h-3 text-neutral-600" />}
+   139→  1771→                            <span className="text-[10px] font-medium truncate">
+   140→  1772→                              {field.signerName || field.type}
+   141→  1773→                            </span>
+   142→  1774→                          </div>
+   143→  1775→                          {/* Assign signer dropdown */}
+   144→  1776→                          <div className="absolute top-full left-0 mt-1 bg-popover border rounded shadow-lg p-1 hidden group-hover/field:block z-10 min-w-[140px]">
+   145→  1777→                            {tempSigners.map((s, si) => (
+   146→  1778→                              <button
+   147→  1779→                                key={si}
+   148→  1780→                                className="w-full text-left px-2 py-1 text-xs hover:bg-muted rounded flex items-center gap-2"
+   149→  1781→                                onClick={(e) => { e.stopPropagation(); handleAssignSigner(field.id, si); }}
+   150→  1782→                              >
+   151→  1783→                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+   152→  1784→                                {s.name}
+   153→  1785→                                {field.signerId === `temp-${si}` && <Check className="w-3 h-3 ml-auto text-emerald-600" />}
+   154→  1786→                              </button>
+   155→  1787→                            ))}
+   156→  1788→                            {tempSigners.length === 0 && (
+   157→  1789→                              <p className="text-xs text-muted-foreground px-2 py-1">Add signers first</p>
+   158→  1790→                            )}
+   159→  1791→                          </div>
+   160→  1792→                          {/* Delete button */}
+   161→  1793→                          <button
+   162→  1794→                            className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover/field:opacity-100 transition-opacity"
+   163→  1795→                            onClick={(e) => { e.stopPropagation(); handleDeleteField(field.id); }}
+   164→  1796→                          >
+   165→  1797→                            <X className="w-3 h-3" />
+   166→  1798→                          </button>
+   167→  1799→                        </div>
+   168→  1800→                      ))}
+   169→  1801→                      {activeTool && (
+   170→  1802→                        <div className="absolute inset-0 border-2 border-dashed border-emerald-300 rounded-lg pointer-events-none" />
+   171→  1803→                      )}
+   172→  1804→                    </div>
+   173→  1805→                  </div>
+   174→  1806→                );
+   175→  1807→              })
+   176→  1808→            )}
+   177→  1809→          </div>
+   178→  1810→        </div>
+   179→  1811→
+   180→  1812→        {/* Bottom action bar */}
+   181→  1813→        {editorDoc.status === 'Draft' && (
+   182→  1814→          <div className="border-t bg-background p-4 sticky bottom-0 z-30">
+   183→  1815→            <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-2">
+   184→  1816→              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+   185→  1817→                <span>{placedFields.length} field{placedFields.length !== 1 ? 's' : ''}</span>
+   186→  1818→                <span>·</span>
+   187→  1819→                <span>{assignedCount} assigned</span>
+   188→  1820→                <span>·</span>
+   189→  1821→                <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>
+   190→  1822→                {ccRecipients.length > 0 && (
+   191→  1823→                  <>
+   192→  1824→                    <span>·</span>
+   193→  1825→                    <span>{ccRecipients.length} CC</span>
+   194→  1826→                  </>
+   195→  1827→                )}
+   196→  1828→              </div>
+   197→  1829→              <div className="flex items-center gap-2">
+   198→  1830→                <Button
+   199→  1831→                  variant="outline"
+   200→  1832→                  size="sm"
+   201→  1833→                  onClick={() => setSaveTemplateDialog(true)}
+   202→  1834→                  disabled={placedFields.length === 0}
+   203→  1835→                >
+   204→  1836→                  <BookmarkPlus className="w-4 h-4 mr-1" /> Save Template
+   205→  1837→                </Button>
+   206→  1838→                <Button
+   207→  1839→                  variant="outline"
+   208→  1840→                  size="sm"
+   209→  1841→                  onClick={handleSignSelf}
+   210→  1842→                  disabled={signSelfLoading || placedFields.length === 0}
+   211→  1843→                >
+   212→  1844→                  {signSelfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><PenLine className="w-4 h-4 mr-1" /> Sign Yourself</>}
+   213→  1845→                </Button>
+   214→  1846→                <Button onClick={handleSendForSigning} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
+   215→  1847→                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> Send for Signing</>}
+   216→  1848→                </Button>
+   217→  1849→              </div>
+   218→  1850→            </div>
+   219→  1851→          </div>
+   220→  1852→        )}
+   221→  1853→
+   222→  1854→        {/* Save Template Dialog */}
+   223→  1855→        <Dialog open={saveTemplateDialog} onOpenChange={setSaveTemplateDialog}>
+   224→  1856→          <DialogContent>
+   225→  1857→            <DialogHeader>
+   226→  1858→              <DialogTitle className="flex items-center gap-2">
+   227→  1859→                <BookmarkPlus className="w-5 h-5 text-emerald-600" /> Save as Template
+   228→  1860→              </DialogTitle>
+   229→  1861→              <DialogDescription>
+   230→  1862→                Save the current field layout as a reusable template. Field positions and types will be preserved.
+   231→  1863→              </DialogDescription>
+   232→  1864→            </DialogHeader>
+   233→  1865→            <div className="space-y-3">
+   234→  1866→              <div className="space-y-2">
+   235→  1867→                <label className="text-sm font-medium">Template Name</label>
+   236→  1868→                <Input
+   237→  1869→                  placeholder="e.g., NDA Template"
+   238→  1870→                  value={saveTemplateName}
+   239→  1871→                  onChange={(e) => setSaveTemplateName(e.target.value)}
+   240→  1872→                  onKeyDown={(e) => e.key === 'Enter' && handleSaveTemplate()}
+   241→  1873→                />
+   242→  1874→              </div>
+   243→  1875→              <p className="text-xs text-muted-foreground">
+   244→  1876→                {placedFields.length} field{placedFields.length !== 1 ? 's' : ''} will be saved
+   245→  1877→              </p>
+   246→  1878→            </div>
+   247→  1879→            <DialogFooter>
+   248→  1880→              <Button variant="outline" onClick={() => setSaveTemplateDialog(false)}>Cancel</Button>
+   249→  1881→              <Button onClick={handleSaveTemplate} disabled={!saveTemplateName.trim()} className="bg-emerald-600 hover:bg-emerald-700">
+   250→  1882→                <Save className="w-4 h-4 mr-2" /> Save Template
+   251→  1883→              </Button>
+   252→  1884→            </DialogFooter>
+   253→  1885→          </DialogContent>
+   254→  1886→        </Dialog>
+   255→  1887→
+   256→  1888→        {/* Load Template Dialog */}
+   257→  1889→        <Dialog open={loadTemplateDialog} onOpenChange={setLoadTemplateDialog}>
+   258→  1890→          <DialogContent>
+   259→  1891→            <DialogHeader>
+   260→  1892→              <DialogTitle>Load Template</DialogTitle>
+   261→  1893→              <DialogDescription>
+   262→  1894→                Select a template to auto-place fields on this document.
+   263→  1895→              </DialogDescription>
+   264→  1896→            </DialogHeader>
+   265→  1897→            <div className="space-y-2 max-h-60 overflow-y-auto">
+   266→  1898→              {templates.length === 0 ? (
+   267→  1899→                <p className="text-sm text-muted-foreground text-center py-4">No templates available</p>
+   268→  1900→              ) : (
+   269→  1901→                templates.map(t => (
+   270→  1902→                  <button
+   271→  1903→                    key={t.id}
+   272→  1904→                    className="w-full text-left p-3 border rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-between"
+   273→  1905→                    onClick={() => handleLoadTemplate(t)}
+   274→  1906→                  >
+   275→  1907→                    <div>
+   276→  1908→                      <p className="text-sm font-medium">{t.name}</p>
+   277→  1909→                      <p className="text-xs text-muted-foreground">{t.fieldConfig.length} fields · {formatDateOnly(t.createdAt)}</p>
+   278→  1910→                    </div>
+   279→  1911→                    <BookmarkPlus className="w-4 h-4 text-emerald-600" />
+   280→  1912→                  </button>
+   281→  1913→                ))
+   282→  1914→              )}
+   283→  1915→            </div>
+   284→  1916→          </DialogContent>
+   285→  1917→        </Dialog>
+   286→  1918→
+   287→  1919→        <footer className="border-t py-3 text-center text-xs text-muted-foreground">
+   288→  1920→          OpenSign-compliant PDF Signing Platform
+   289→  1921→        </footer>
+   290→  1922→      </div>
+   291→  1923→    );
+   292→  1924→  }
+   293→  1925→
+   294→  1926→  // === VIEWER VIEW ===
+   295→  1927→  if (store.currentView === 'viewer') {
+   296→  1928→    if (viewerLoading) {
+   297→  1929→      return (
+   298→  1930→        <div className="min-h-screen flex items-center justify-center">
+   299→  1931→          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+   300→  1932→        </div>
+   301→  1933→      );
+   302→  1934→    }
+   303→  1935→
+   304→  1936→    if (!viewerDoc) return null;
+   305→  1937→
+   306→  1938→    return (
+   307→  1939→      <div className="min-h-screen flex flex-col bg-background">
+   308→  1940→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+   309→  1941→          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+   310→  1942→            <div className="flex items-center gap-3">
+   311→  1943→              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setViewingDocument(null); }}>
+   312→  1944→                <ArrowLeft className="w-4 h-4" />
+   313→  1945→              </Button>
+   314→  1946→              <div>
+   315→  1947→                <h1 className="font-semibold text-sm truncate max-w-[300px]">{viewerDoc.title}</h1>
+   316→  1948→                <div className="flex items-center gap-2">
+   317→  1949→                  <StatusBadge status={viewerDoc.status} />
+   318→  1950→                  <span className="text-xs text-muted-foreground">{formatDate(viewerDoc.createdAt)}</span>
+   319→  1951→                </div>
+   320→  1952→              </div>
+   321→  1953→            </div>
+   322→  1954→            <div className="flex items-center gap-2">
+   323→  1955→              {viewerDoc.status === 'Completed' && (
+   324→  1956→                <>
+   325→  1957→                  <Button size="sm" variant="outline" onClick={handleDownloadCertificate} className="hidden sm:flex">
+   326→  1958→                    <Award className="w-4 h-4 mr-1" /> Certificate
+   327→  1959→                  </Button>
+   328→  1960→                  <Button size="sm" onClick={handleDownload} className="bg-emerald-600 hover:bg-emerald-700">
+   329→  1961→                    <Download className="w-4 h-4 mr-1" /> Download
+   330→  1962→                  </Button>
+   331→  1963→                </>
+   332→  1964→              )}
+   333→  1965→              <ThemeToggle />
+   334→  1966→            </div>
+   335→  1967→          </div>
+   336→  1968→        </header>
+   337→  1969→
+   338→  1970→        <main className="flex-1 max-w-5xl mx-auto w-full p-4 sm:p-6 space-y-6">
+   339→  1971→          {/* Rejection Info */}
+   340→  1972→          {viewerDoc.status === 'Rejected' && (
+   341→  1973→            <motion.div
+   342→  1974→              initial={{ opacity: 0, y: -10 }}
+   343→  1975→              animate={{ opacity: 1, y: 0 }}
+   344→  1976→              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4"
+   345→  1977→            >
+   346→  1978→              <div className="flex items-start gap-3">
+   347→  1979→                <XCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+   348→  1980→                <div>
+   349→  1981→                  <h3 className="font-semibold text-red-800 dark:text-red-400">Document Rejected</h3>
+   350→  1982→                  {viewerDoc.rejectedBy && (
+   351→  1983→                    <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+   352→  1984→                      Rejected by: {viewerDoc.rejectedBy}
+   353→  1985→                    </p>
+   354→  1986→                  )}
+   355→  1987→                  {viewerDoc.rejectionReason && (
+   356→  1988→                    <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+   357→  1989→                      Reason: {viewerDoc.rejectionReason}
+   358→  1990→                    </p>
+   359→  1991→                  )}
+   360→  1992→                </div>
+   361→  1993→              </div>
+   362→  1994→            </motion.div>
+   363→  1995→          )}
+   364→  1996→
+   365→  1997→          {/* Expiry Info */}
+   366→  1998→          {viewerDoc.expiresAt && (
+   367→  1999→            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   368→  2000→              <Clock className="w-4 h-4" />
+   369→  2001→              <span>Expires: {formatDateOnly(viewerDoc.expiresAt)}</span>
+   370→  2002→              {new Date(viewerDoc.expiresAt) < new Date() && (
+   371→  2003→                <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">Expired</Badge>
+   372→  2004→              )}
+   373→  2005→            </div>
+   374→  2006→          )}
+   375→  2007→
+   376→  2008→          {/* Signers Status */}
+   377→  2009→          <Card>
+   378→  2010→            <CardHeader className="pb-3">
+   379→  2011→              <CardTitle className="text-sm flex items-center gap-2">
+   380→  2012→                <Users className="w-4 h-4" /> Signers ({viewerDoc.signers.length})
+   381→  2013→              </CardTitle>
+   382→  2014→            </CardHeader>
+   383→  2015→            <CardContent>
+   384→  2016→              <div className="space-y-2">
+   385→  2017→                {viewerDoc.signers.map((signer, i) => (
+   386→  2018→                  <div key={signer.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
+   387→  2019→                    <div className="flex items-center gap-3">
+   388→  2020→                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+   389→  2021→                        style={{ backgroundColor: `${SIGNER_COLORS[i % SIGNER_COLORS.length]}20`, color: SIGNER_COLORS[i % SIGNER_COLORS.length] }}
+   390→  2022→                      >
+   391→  2023→                        {signer.name.charAt(0).toUpperCase()}
+   392→  2024→                      </div>
+   393→  2025→                      <div>
+   394→  2026→                        <p className="text-sm font-medium">{signer.name}</p>
+   395→  2027→                        <p className="text-xs text-muted-foreground">{signer.email}</p>
+   396→  2028→                      </div>
+   397→  2029→                    </div>
+   398→  2030→                    <div className="flex items-center gap-2">
+   399→  2031→                      {/* Rejection status for signer */}
+   400→  2032→                      {signer.rejectedAt && (
+   401→  2033→                        <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+   402→  2034→                          <XCircle className="w-3 h-3 mr-1" /> Rejected
+   403→  2035→                        </Badge>
+   404→  2036→                      )}
+   405→  2037→                      {signer.rejectionReason && (
+   406→  2038→                        <span className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate" title={signer.rejectionReason}>
+   407→  2039→                          {signer.rejectionReason}
+   408→  2040→                        </span>
+   409→  2041→                      )}
+   410→  2042→                      {!signer.rejectedAt && !signer.signedAt && signer.token && (
+   411→  2043→                        <Button
+   412→  2044→                          variant="ghost"
+   413→  2045→                          size="icon"
+   414→  2046→                          className="h-7 w-7"
+   415→  2047→                          title="Copy signing link"
+   416→  2048→                          onClick={() => {
+   417→  2049→                            const link = `${window.location.origin}/?sign=${signer.token}`;
+   418→  2050→                            navigator.clipboard.writeText(link);
+   419→  2051→                            toast.success('Signing link copied!');
+   420→  2052→                          }}
+   421→  2053→                        >
+   422→  2054→                          <Copy className="w-3.5 h-3.5" />
+   423→  2055→                        </Button>
+   424→  2056→                      )}
+   425→  2057→                      {!signer.rejectedAt && signer.signedAt ? (
+   426→  2058→                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+   427→  2059→                          <Check className="w-3 h-3 mr-1" /> Signed
+   428→  2060→                        </Badge>
+   429→  2061→                      ) : !signer.rejectedAt ? (
+   430→  2062→                        <Badge variant="secondary">Pending</Badge>
+   431→  2063→                      ) : null}
+   432→  2064→                    </div>
+   433→  2065→                  </div>
+   434→  2066→                ))}
+   435→  2067→              </div>
+   436→  2068→
+   437→  2069→              {/* CC Recipients */}
+   438→  2070→              {viewerDoc.ccRecipients && viewerDoc.ccRecipients.length > 0 && (
+   439→  2071→                <>
+   440→  2072→                  <Separator className="my-3" />
+   441→  2073→                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">CC Recipients</h4>
+   442→  2074→                  <div className="space-y-2">
+   443→  2075→                    {viewerDoc.ccRecipients.map((cc, i) => (
+   444→  2076→                      <div key={i} className="flex items-center gap-3 p-2 rounded-lg">
+   445→  2077→                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground">
+   446→  2078→                          {cc.name.charAt(0).toUpperCase()}
+   447→  2079→                        </div>
+   448→  2080→                        <div>
+   449→  2081→                          <p className="text-sm font-medium">{cc.name}</p>
+   450→  2082→                          <p className="text-xs text-muted-foreground">{cc.email}</p>
+   451→  2083→                        </div>
+   452→  2084→                        <Badge variant="secondary" className="ml-auto text-xs">CC</Badge>
+   453→  2085→                      </div>
+   454→  2086→                    ))}
+   455→  2087→                  </div>
+   456→  2088→                </>
+   457→  2089→              )}
+   458→  2090→            </CardContent>
+   459→  2091→          </Card>
+   460→  2092→
+   461→  2093→          {/* PDF Pages */}
+   462→  2094→          {viewerPdfLoading ? (
+   463→  2095→            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+   464→  2096→          ) : (
+   465→  2097→            <div className="space-y-4">
+   466→  2098→              {viewerPages.map((page, idx) => {
+   467→  2099→                const pageFields = viewerDoc.fields.filter(f => f.pageNumber === page.pageNumber);
+   468→  2100→                return (
+   469→  2101→                  <div key={idx} className="space-y-1">
+   470→  2102→                    <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {viewerPages.length}</p>
+   471→  2103→                    <div className="relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white" style={{ maxWidth: 612 }}>
+   472→  2104→                      <img src={page.dataUrl} alt={`Page ${page.pageNumber}`} className="w-full h-auto" draggable={false} />
+   473→  2105→                      {pageFields.map(field => (
+   474→  2106→                        <div
+   475→  2107→                          key={field.id}
+   476→  2108→                          className={`absolute border rounded flex items-center justify-center p-1 ${
+   477→  2109→                            field.value
+   478→  2110→                              ? 'border-emerald-400 bg-emerald-50/80'
+   479→  2111→                              : 'border-muted-foreground/30 bg-muted/30'
+   480→  2112→                          }`}
+   481→  2113→                          style={{
+   482→  2114→                            left: `${(field.x / 612) * 100}%`,
+   483→  2115→                            top: `${(field.y / 792) * 100}%`,
+   484→  2116→                            width: `${(field.width / 612) * 100}%`,
+   485→  2117→                            height: `${(field.height / 792) * 100}%`,
+   486→  2118→                          }}
+   487→  2119→                        >
+   488→  2120→                          {field.value && field.type === 'signature' && field.value.startsWith('data:') ? (
+   489→  2121→                            <img src={field.value} alt="Signature" className="h-full object-contain" />
+   490→  2122→                          ) : field.value ? (
+   491→  2123→                            <span className="text-xs font-medium truncate">{field.value}</span>
+   492→  2124→                          ) : (
+   493→  2125→                            <span className="text-[10px] text-muted-foreground capitalize">{field.type}</span>
+   494→  2126→                          )}
+   495→  2127→                        </div>
+   496→  2128→                      ))}
+   497→  2129→                    </div>
+   498→  2130→                  </div>
+   499→  2131→                );
+   500→  2132→              })}
+
+[showing lines 1-500 of 551; use offset=501 with limit to continue reading]

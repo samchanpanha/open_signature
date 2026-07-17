@@ -31,11 +31,16 @@ interface AppState {
   signingToken: string | null;
   setSigningToken: (token: string | null) => void;
 
-  // Toast
-  toastMessage: string | null;
-  toastType: 'success' | 'error' | 'info';
-  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
-  hideToast: () => void;
+  // Organization
+  currentOrgId: string | null;  // null = personal, string = org id
+  setCurrentOrgId: (id: string | null) => void;
+
+  // Org settings dialog
+  orgSettingsOpen: boolean;
+  setOrgSettingsOpen: (open: boolean) => void;
+  orgSettingsOrgId: string | null;
+  openOrgSettings: (orgId: string) => void;
+  closeOrgSettings: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -62,8 +67,12 @@ export const useAppStore = create<AppState>((set) => ({
   signingToken: null,
   setSigningToken: (token) => set({ signingToken: token }),
 
-  toastMessage: null,
-  toastType: 'info',
-  showToast: (message, type = 'info') => set({ toastMessage: message, toastType: type }),
-  hideToast: () => set({ toastMessage: null }),
+  currentOrgId: null,
+  setCurrentOrgId: (id) => set({ currentOrgId: id }),
+
+  orgSettingsOpen: false,
+  setOrgSettingsOpen: (open) => set({ orgSettingsOpen: open }),
+  orgSettingsOrgId: null,
+  openOrgSettings: (orgId) => set({ orgSettingsOpen: true, orgSettingsOrgId: orgId }),
+  closeOrgSettings: () => set({ orgSettingsOpen: false, orgSettingsOrgId: null }),
 }));

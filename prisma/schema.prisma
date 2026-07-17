@@ -7,6 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User                @relation("OrgOwner", fields: [ownerId], references: [id])
+  members OrganizationMember[]
+  documents Document[]
+}
+
+model OrganizationMember {
+  id        String   @id @default(cuid())
+  role      String   @default("member") // owner, admin, member
+  joinedAt  DateTime @default(now())
+  userId    String
+  orgId     String
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -15,10 +41,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  documents    Document[]
-  auditLogs    AuditLog[]
-  templates    DocumentTemplate[]
-  savedSignatures SavedSignature[]
+  documents        Document[]
+  auditLogs        AuditLog[]
+  templates        DocumentTemplate[]
+  savedSignatures  SavedSignature[]
+  ownedOrgs        Organization[]       @relation("OrgOwner")
+  organizationMembers OrganizationMember[]
 }
 
 model Document {
@@ -33,42 +61,44 @@ model Document {
   signedSelf      Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  organizationId  String?
 
-  owner      User           @relation(fields: [ownerId], references: [id])
-  signers    Signer[]
-  fields     DocumentField[]
-  ccRecipients CcRecipient[]
-  auditLogs  AuditLog[]
-  templateId String?
-  template   DocumentTemplate? @relation(fields: [templateId], references: [id])
+  owner         User           @relation(fields: [ownerId], references: [id])
+  organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  signers       Signer[]
+  fields        DocumentField[]
+  ccRecipients  CcRecipient[]
+  auditLogs     AuditLog[]
+  templateId    String?
+  template      DocumentTemplate? @relation(fields: [templateId], references: [id])
 }
 
 model DocumentTemplate {
-  id        String   @id @default(cuid())
-  name      String
-  ownerId   String
+  id         String   @id @default(cuid())
+  name       String
+  ownerId    String
   fieldConfig String // JSON: array of field definitions
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   documents Document[]
 }
 
 model Signer {
-  id             String    @id @default(cuid())
-  email          String
-  name           String
-  order          Int       @default(1)
-  signedAt       DateTime?
-  rejectedAt     DateTime?
+  id              String    @id @default(cuid())
+  email           String
+  name            String
+  order           Int       @default(1)
+  signedAt        DateTime?
+  rejectedAt      DateTime?
   rejectionReason String?
-  token          String    @unique
-  otpCode        String?
-  otpVerifiedAt  DateTime?
-  documentId     String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  token           String    @unique
+  otpCode         String?
+  otpVerifiedAt   DateTime?
+  documentId      String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   document Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   fields   DocumentField[]

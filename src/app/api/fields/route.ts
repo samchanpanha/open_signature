@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { documentId, type, pageNumber, x, y, width, height, signerId } = await req.json();
+    const { documentId, type, pageNumber, x, y, width, height, signerId, label, required } = await req.json();
 
     // Verify document ownership
     const doc = await db.document.findFirst({
@@ -25,12 +25,19 @@ export async function POST(req: NextRequest) {
     }
 
     const field = await db.documentField.create({
-      data: { documentId, type, pageNumber, x, y, width, height, signerId: signerId || null },
+      data: {
+        documentId, type, pageNumber, x, y, width, height,
+        signerId: signerId || null,
+        label: label || null,
+        required: required !== undefined ? required : true,
+      },
     });
 
     return NextResponse.json({
       id: field.id,
       type: field.type,
+      label: field.label,
+      required: field.required,
       pageNumber: field.pageNumber,
       x: field.x,
       y: field.y,

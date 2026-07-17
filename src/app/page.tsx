@@ -7,7 +7,8 @@ import {
   Clock, Shield, X, ChevronDown, ChevronRight, Loader2, FileSignature,
   AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon,
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
-  FileDown, XCircle, AlertTriangle, Save
+  FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
+  GripVertical, UserCog, Crown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -40,6 +41,8 @@ interface PlacedField {
   signerName?: string;
   signerColor?: string;
   value?: string | null;
+  label?: string | null;
+  required?: boolean;
 }
 
 interface TempSigner {
@@ -299,6 +302,20 @@ export default function Home() {
   const [templateLoading, setTemplateLoading] = useState(false);
   const [loadTemplateDialog, setLoadTemplateDialog] = useState(false);
 
+  // Organizations
+  const [orgs, setOrgs] = useState<OrgListItem[]>([]);
+  const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
+  const [orgDetail, setOrgDetail] = useState<import('@/lib/api').OrgDetail | null>(null);
+  const [orgDetailLoading, setOrgDetailLoading] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('member');
+  const [inviting, setInviting] = useState(false);
+  const [createOrgDialog, setCreateOrgDialog] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [creatingOrg, setCreatingOrg] = useState(false);
+  const [deleteOrgConfirm, setDeleteOrgConfirm] = useState(false);
+  const [deletingOrg, setDeletingOrg] = useState(false);
+
   // Editor
   const [editorDoc, setEditorDoc] = useState<DocumentDetail | null>(null);
   const [editorLoading, setEditorLoading] = useState(false);
@@ -312,14 +329,31 @@ export default function Home() {
   const [newSignerEmail, setNewSignerEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [signSelfLoading, setSignSelfLoading] = useState(false);
-  const [draggingField, setDraggingField] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [expiryDate, setExpiryDate] = useState('');
   const [ccRecipients, setCcRecipients] = useState<CcRecipient[]>([]);
   const [newCcName, setNewCcName] = useState('');
   const [newCcEmail, setNewCcEmail] = useState('');
   const [saveTemplateName, setSaveTemplateName] = useState('');
   const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
+
+  // Drag-to-move
+  const [draggingField, setDraggingField] = useState<string | null>(null);
+  const [dragStartPos, setDragStartPos] = useState<{ mouseX: number; mouseY: number; fieldX: number; fieldY: number; pageRect: DOMRect } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [fieldEditDialog, setFieldEditDialog] = useState(false);
+  const [editFieldLabel, setEditFieldLabel] = useState('');
+  const [editFieldRequired, setEditFieldRequired] = useState(true);
+  const [editFieldWidth, setEditFieldWidth] = useState(200);
+  const [editFieldHeight, setEditFieldHeight] = useState(40);
+  const [editFieldSignerId, setEditFieldSignerId] = useState<string | null>(null);
+  const [savingField, setSavingField] = useState(false);
+
+  // Refs
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const placedFieldsRef = useRef(placedFields);
+  const dragFieldIdRef = useRef<string | null>(null);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; fieldX: number; fieldY: number; pageRect: DOMRect } | null>(null);
 
   // Viewer
   const [viewerDoc, setViewerDoc] = useState<DocumentDetail | null>(null);
@@ -342,6 +376,11 @@ export default function Home() {
   const [rejecting, setRejecting] = useState(false);
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
   const [savedSigsLoading, setSavedSigsLoading] = useState(false);
+
+  // Keep placedFields ref in sync
+  useEffect(() => {
+    placedFieldsRef.current = placedFields;
+  }, [placedFields]);
 
   // ============ INIT ============
   useEffect(() => {
@@ -395,18 +434,130 @@ export default function Home() {
     }
   };
 
+  // ============ ORG HANDLERS ============
+  const loadOrgs = useCallback(async () => {
+    try {
+      const list = await orgApi.list();
+      setOrgs(list);
+    } catch {
+      // Silently ignore
+    }
+  }, []);
+
+  const handleCreateOrg = async () => {
+    if (!newOrgName.trim()) { toast.error('Enter organization name'); return; }
+    setCreatingOrg(true);
+    try {
+      const org = await orgApi.create(newOrgName.trim());
+      toast.success(`Organization "${org.name}" created!`);
+      setCreateOrgDialog(false);
+      setNewOrgName('');
+      loadOrgs();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create organization');
+    } finally {
+      setCreatingOrg(false);
+    }
+  };
+
+  const handleSelectOrg = (orgId: string | null) => {
+    store.setCurrentOrgId(orgId);
+    setOrgDropdownOpen(false);
+  };
+
+  const loadOrgDetail = useCallback(async (orgId: string) => {
+    setOrgDetailLoading(true);
+    try {
+      const detail = await orgApi.get(orgId);
+      setOrgDetail(detail);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load organization');
+      store.closeOrgSettings();
+    } finally {
+      setOrgDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (store.orgSettingsOpen && store.orgSettingsOrgId) {
+      loadOrgDetail(store.orgSettingsOrgId);
+    } else {
+      setOrgDetail(null);
+    }
+  }, [store.orgSettingsOpen, store.orgSettingsOrgId, loadOrgDetail]);
+
+  const handleInviteMember = async () => {
+    if (!store.orgSettingsOrgId || !inviteEmail.trim()) return;
+    setInviting(true);
+    try {
+      await orgApi.inviteMember(store.orgSettingsOrgId, inviteEmail.trim(), inviteRole);
+      toast.success('Member invited successfully!');
+      setInviteEmail('');
+      setInviteRole('member');
+      loadOrgDetail(store.orgSettingsOrgId);
+      loadOrgs();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to invite member');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleUpdateMemberRole = async (memberId: string, newRole: string) => {
+    if (!store.orgSettingsOrgId) return;
+    try {
+      await orgApi.updateMemberRole(store.orgSettingsOrgId, memberId, newRole);
+      toast.success('Role updated');
+      loadOrgDetail(store.orgSettingsOrgId);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update role');
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!store.orgSettingsOrgId) return;
+    try {
+      await orgApi.removeMember(store.orgSettingsOrgId, memberId);
+      toast.success('Member removed');
+      loadOrgDetail(store.orgSettingsOrgId);
+      loadOrgs();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove member');
+    }
+  };
+
+  const handleDeleteOrg = async () => {
+    if (!store.orgSettingsOrgId) return;
+    setDeletingOrg(true);
+    try {
+      await orgApi.delete(store.orgSettingsOrgId);
+      toast.success('Organization deleted');
+      setDeleteOrgConfirm(false);
+      store.closeOrgSettings();
+      if (store.currentOrgId === store.orgSettingsOrgId) {
+        store.setCurrentOrgId(null);
+      }
+      loadOrgs();
+      loadDocuments();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete organization');
+    } finally {
+      setDeletingOrg(false);
+    }
+  };
+
   // ============ DASHBOARD ============
   const loadDocuments = useCallback(async () => {
     setDashLoading(true);
     try {
-      const docs = await documentsApi.list();
+      const docs = await documentsApi.list(store.currentOrgId);
       setDocuments(docs);
     } catch {
       toast.error('Failed to load documents');
     } finally {
       setDashLoading(false);
     }
-  }, []);
+  }, [store.currentOrgId]);
 
   const loadTemplates = useCallback(async () => {
     setTemplateLoading(true);
@@ -424,8 +575,16 @@ export default function Home() {
     if (store.currentView === 'dashboard' && store.user) {
       loadDocuments();
       loadTemplates();
+      loadOrgs();
     }
-  }, [store.currentView, store.user, loadDocuments, loadTemplates]);
+  }, [store.currentView, store.user, loadDocuments, loadTemplates, loadOrgs]);
+
+  // Reload documents when org changes
+  useEffect(() => {
+    if (store.currentView === 'dashboard' && store.user) {
+      loadDocuments();
+    }
+  }, [store.currentOrgId]);
 
   const filteredDocuments = useMemo(() => {
     let docs = documents;
@@ -439,6 +598,11 @@ export default function Home() {
     return docs;
   }, [documents, statusFilter, searchQuery]);
 
+  const currentOrg = useMemo(() => {
+    if (!store.currentOrgId) return null;
+    return orgs.find(o => o.id === store.currentOrgId) || null;
+  }, [orgs, store.currentOrgId]);
+
   const handleUpload = async () => {
     if (!uploadFile) { toast.error('Please select a PDF'); return; }
     setUploading(true);
@@ -446,6 +610,9 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', uploadFile);
       formData.append('title', uploadTitle || uploadFile.name.replace('.pdf', ''));
+      if (store.currentOrgId) {
+        formData.append('organizationId', store.currentOrgId);
+      }
       const doc = await documentsApi.create(formData);
       toast.success('Document uploaded!');
       setUploadDialog(false);
@@ -494,7 +661,6 @@ export default function Home() {
   const handleLoadTemplate = async (template: Template) => {
     if (!store.editingDocumentId) return;
     try {
-      // Parse template fields and create them on the current document
       for (const f of template.fieldConfig) {
         await fieldsApi.create(store.editingDocumentId, {
           type: f.type,
@@ -505,7 +671,6 @@ export default function Home() {
           height: f.height,
         });
       }
-      // Reload editor
       const doc = await documentsApi.get(store.editingDocumentId);
       setEditorDoc(doc);
       setPlacedFields(doc.fields.map((f) => ({
@@ -518,6 +683,8 @@ export default function Home() {
         height: f.height,
         signerId: f.signerId || undefined,
         value: f.value,
+        label: f.label,
+        required: f.required,
       })));
       setLoadTemplateDialog(false);
       toast.success(`Template "${template.name}" applied`);
@@ -544,6 +711,8 @@ export default function Home() {
         height: f.height,
         signerId: f.signerId || undefined,
         value: f.value,
+        label: f.label,
+        required: f.required,
       })));
 
       // Render PDF pages
@@ -603,7 +772,7 @@ export default function Home() {
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
     const defaults = FIELD_DEFAULTS[activeTool];
-    const signer = tempSigners.find((_, i) => `temp-${i}` === activeSignerId);
+    const signer = activeSignerId ? tempSigners[parseInt(activeSignerId.replace('temp-', ''), 10)] : null;
 
     try {
       const field = await fieldsApi.create(store.editingDocumentId, {
@@ -614,17 +783,20 @@ export default function Home() {
         height: defaults.height,
         signerId: signer ? undefined : undefined,
       });
+      const createdField = field as { id: string; x: number; y: number; width: number; height: number };
       setPlacedFields((prev) => [...prev, {
-        id: field.id,
+        id: createdField.id,
         type: activeTool,
         pageNumber: pageIndex + 1,
-        x: field.x,
-        y: field.y,
-        width: field.width,
-        height: field.height,
+        x: createdField.x,
+        y: createdField.y,
+        width: createdField.width,
+        height: createdField.height,
         signerId: activeSignerId || undefined,
         signerName: signer?.name,
         signerColor: signer?.color,
+        label: null,
+        required: true,
       }]);
       toast.success(`${activeTool} field added`);
     } catch (err: any) {
@@ -636,6 +808,10 @@ export default function Home() {
     try {
       await fieldsApi.delete(fieldId);
       setPlacedFields((prev) => prev.filter((f) => f.id !== fieldId));
+      if (selectedFieldId === fieldId) {
+        setSelectedFieldId(null);
+        setFieldEditDialog(false);
+      }
       toast.success('Field removed');
     } catch {
       toast.error('Failed to remove field');
@@ -643,7 +819,6 @@ export default function Home() {
   };
 
   const handleAssignSigner = async (fieldId: string, signerIndex: number) => {
-    if (!store.editingDocumentId) return;
     const signer = tempSigners[signerIndex];
     const signerId = `temp-${signerIndex}`;
     try {
@@ -656,31 +831,153 @@ export default function Home() {
     }
   };
 
-  const handleFieldDragStart = (fieldId: string, _e: React.MouseEvent) => {
-    const field = placedFields.find(f => f.id === fieldId);
+  // ============ DRAG-TO-MOVE ============
+  const handleFieldMouseDown = useCallback((fieldId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (activeTool) return;
+
+    const field = placedFieldsRef.current.find(f => f.id === fieldId);
     if (!field) return;
+
+    const pageEl = (e.target as HTMLElement).closest('[data-page]') as HTMLElement;
+    if (!pageEl) return;
+    const pageRect = pageEl.getBoundingClientRect();
+
+    const startPos = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      fieldX: field.x,
+      fieldY: field.y,
+      pageRect,
+    };
+
     setDraggingField(fieldId);
-  };
-
-  const handleFieldDrag = useCallback((_e: MouseEvent) => {
-    if (!draggingField) return;
-  }, [draggingField]);
-
-  const handleFieldDragEnd = useCallback(() => {
-    setDraggingField(null);
-  }, []);
+    dragFieldIdRef.current = fieldId;
+    setDragStartPos(startPos);
+    dragStartRef.current = startPos;
+    setIsDragging(false);
+    setSelectedFieldId(fieldId);
+  }, [activeTool]);
 
   useEffect(() => {
-    if (draggingField) {
-      window.addEventListener('mousemove', handleFieldDrag);
-      window.addEventListener('mouseup', handleFieldDragEnd);
-      return () => {
-        window.removeEventListener('mousemove', handleFieldDrag);
-        window.removeEventListener('mouseup', handleFieldDragEnd);
-      };
-    }
-  }, [draggingField, handleFieldDrag, handleFieldDragEnd]);
+    if (!draggingField) return;
 
+    const handleMove = (e: MouseEvent) => {
+      if (!dragStartRef.current || !dragFieldIdRef.current) return;
+
+      const start = dragStartRef.current;
+      const dx = (e.clientX - start.mouseX) * (612 / start.pageRect.width);
+      const dy = (e.clientY - start.mouseY) * (792 / start.pageRect.height);
+
+      // Only start visual drag after a small threshold
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        setIsDragging(true);
+      }
+
+      if (!isDragging) return;
+
+      const fieldWidth = placedFieldsRef.current.find(f => f.id === dragFieldIdRef.current)?.width || 100;
+      const fieldHeight = placedFieldsRef.current.find(f => f.id === dragFieldIdRef.current)?.height || 40;
+
+      let newX = Math.max(0, Math.min(612 - fieldWidth, start.fieldX + dx));
+      let newY = Math.max(0, Math.min(792 - fieldHeight, start.fieldY + dy));
+
+      setPlacedFields(prev => prev.map(f =>
+        f.id === dragFieldIdRef.current ? { ...f, x: newX, y: newY } : f
+      ));
+    };
+
+    const handleUp = async () => {
+      const fieldId = dragFieldIdRef.current;
+      const wasDragging = isDragging;
+
+      if (wasDragging && fieldId) {
+        // Persist the new position
+        const latestField = placedFieldsRef.current.find(f => f.id === fieldId);
+        if (latestField) {
+          try {
+            await fieldsApi.update(fieldId, { x: latestField.x, y: latestField.y });
+          } catch {
+            // Silently ignore persist error
+          }
+        }
+      }
+
+      setDraggingField(null);
+      dragFieldIdRef.current = null;
+      setDragStartPos(null);
+      dragStartRef.current = null;
+
+      if (!wasDragging && fieldId) {
+        // It was a click, not a drag — open field edit dialog
+        setFieldEditDialog(true);
+        const field = placedFieldsRef.current.find(f => f.id === fieldId);
+        if (field) {
+          setEditFieldLabel(field.label || '');
+          setEditFieldRequired(field.required ?? true);
+          setEditFieldWidth(Math.round(field.width));
+          setEditFieldHeight(Math.round(field.height));
+          setEditFieldSignerId(field.signerId || null);
+        }
+      }
+
+      // Delay clearing isDragging so the click handler can check it
+      setTimeout(() => {
+        setIsDragging(false);
+      }, 50);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [draggingField, isDragging]);
+
+  // ============ FIELD EDIT DIALOG ============
+  const handleSaveFieldEdit = async () => {
+    if (!selectedFieldId) return;
+    setSavingField(true);
+    try {
+      await fieldsApi.update(selectedFieldId, {
+        label: editFieldLabel || null,
+        required: editFieldRequired,
+        width: editFieldWidth,
+        height: editFieldHeight,
+        signerId: editFieldSignerId,
+      });
+      setPlacedFields(prev => prev.map(f => {
+        if (f.id !== selectedFieldId) return f;
+        const signer = editFieldSignerId ? tempSigners[parseInt(editFieldSignerId.replace('temp-', ''), 10)] : null;
+        return {
+          ...f,
+          label: editFieldLabel || null,
+          required: editFieldRequired,
+          width: editFieldWidth,
+          height: editFieldHeight,
+          signerId: editFieldSignerId || undefined,
+          signerName: signer?.name || undefined,
+          signerColor: signer?.color || undefined,
+        };
+      }));
+      toast.success('Field updated');
+      setFieldEditDialog(false);
+      setSelectedFieldId(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update field');
+    } finally {
+      setSavingField(false);
+    }
+  };
+
+  const selectedFieldForEdit = useMemo(() => {
+    if (!selectedFieldId) return null;
+    return placedFields.find(f => f.id === selectedFieldId) || null;
+  }, [selectedFieldId, placedFields]);
+
+  // ============ SEND / SIGN SELF / TEMPLATE ============
   const handleSendForSigning = async () => {
     if (!store.editingDocumentId || !editorDoc) return;
     const assignedFields = placedFields.filter(f => f.signerId);
@@ -755,7 +1052,6 @@ export default function Home() {
       setViewerDoc(doc);
 
       const token = localStorage.getItem('token');
-      const pdfPath = doc.signedPdfPath || doc.originalPdfPath;
       const res = await fetch(`/api/documents/${store.viewingDocumentId}/download`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -925,8 +1221,7 @@ export default function Home() {
       toast.success('Document rejected');
       setRejectDialog(false);
       setRejectReason('');
-      // Show a rejection confirmation
-      setSigningComplete(true); // reuse the completion state to show result
+      setSigningComplete(true);
     } catch (err: any) {
       toast.error(err.message || 'Failed to reject');
     } finally {
@@ -939,7 +1234,7 @@ export default function Home() {
     const expiry = new Date(signingInfo.document.expiresAt);
     const now = new Date();
     const diff = expiry.getTime() - now.getTime();
-    return diff > 0 && diff < 24 * 60 * 60 * 1000; // < 24h
+    return diff > 0 && diff < 24 * 60 * 60 * 1000;
   }, [signingInfo]);
 
   // ============ RENDER ============
@@ -1115,7 +1410,6 @@ export default function Home() {
                       <SignatureCanvas
                         onSave={(dataUrl) => {
                           handleSigningFieldUpdate(field.id, dataUrl);
-                          // Also offer to save
                         }}
                       />
                     </TabsContent>
@@ -1315,6 +1609,76 @@ export default function Home() {
               <span className="font-bold text-lg">OpenSign</span>
             </div>
             <div className="flex items-center gap-2">
+              {/* Org Selector Dropdown */}
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span className="hidden sm:inline max-w-[120px] truncate">
+                    {currentOrg ? currentOrg.name : 'Personal'}
+                  </span>
+                  <ChevronDown className="w-3 h-3" />
+                </Button>
+                {orgDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setOrgDropdownOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 w-64 bg-popover border rounded-lg shadow-lg z-50 py-1">
+                      {/* Personal option */}
+                      <button
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 ${!store.currentOrgId ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : ''}`}
+                        onClick={() => handleSelectOrg(null)}
+                      >
+                        <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-xs font-bold">
+                          {store.user?.name?.charAt(0).toUpperCase() || 'U'}
+                        </div>
+                        <span className="flex-1">Personal</span>
+                        {!store.currentOrgId && <Check className="w-4 h-4 text-emerald-600" />}
+                      </button>
+                      <Separator className="my-1" />
+                      {/* Organization options */}
+                      {orgs.map(org => (
+                        <button
+                          key={org.id}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 ${store.currentOrgId === org.id ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : ''}`}
+                          onClick={() => handleSelectOrg(org.id)}
+                        >
+                          <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                            {org.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="truncate">{org.name}</p>
+                            <p className="text-xs text-muted-foreground">{org.memberCount} members</p>
+                          </div>
+                          {store.currentOrgId === org.id && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                        </button>
+                      ))}
+                      <Separator className="my-1" />
+                      {/* Create Org */}
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 text-emerald-600"
+                        onClick={() => { setOrgDropdownOpen(false); setCreateOrgDialog(true); }}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create Organization
+                      </button>
+                      {/* Org Settings (if an org is selected) */}
+                      {currentOrg && (
+                        <button
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
+                          onClick={() => { setOrgDropdownOpen(false); store.openOrgSettings(currentOrg.id); }}
+                        >
+                          <Settings className="w-4 h-4" />
+                          Org Settings
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
               <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
               <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={store.logout}>
@@ -1325,6 +1689,21 @@ export default function Home() {
         </header>
 
         <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 space-y-6">
+          {/* Current org banner */}
+          {currentOrg && (
+            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <Building2 className="w-4 h-4 text-emerald-600" />
+                <span className="font-medium text-emerald-800 dark:text-emerald-300">{currentOrg.name}</span>
+                <Badge variant="secondary" className="text-xs">{currentOrg.role}</Badge>
+                <span className="text-emerald-600 dark:text-emerald-400">{currentOrg.documentCount} docs</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => store.openOrgSettings(currentOrg.id)} className="text-emerald-700 dark:text-emerald-400">
+                <UserCog className="w-4 h-4" />
+              </Button>
+            </motion.div>
+          )}
+
           {/* Templates Section */}
           {templates.length > 0 && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
@@ -1374,7 +1753,9 @@ export default function Home() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold">Documents</h1>
-              <p className="text-sm text-muted-foreground">Manage and send documents for signing</p>
+              <p className="text-sm text-muted-foreground">
+                {currentOrg ? `Documents in ${currentOrg.name}` : 'Manage and send documents for signing'}
+              </p>
             </div>
             <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
               <Plus className="w-4 h-4 mr-2" /> New Document
@@ -1510,6 +1891,9 @@ export default function Home() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Upload Document</DialogTitle>
+              <DialogDescription>
+                {currentOrg ? `This document will be created in ${currentOrg.name}.` : 'Upload a PDF document to prepare for signing.'}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-emerald-400 transition-colors"
@@ -1539,6 +1923,216 @@ export default function Home() {
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4 mr-2" /> Upload</>}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Create Org Dialog */}
+        <Dialog open={createOrgDialog} onOpenChange={setCreateOrgDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-emerald-600" /> Create Organization
+              </DialogTitle>
+              <DialogDescription>
+                Create a new organization to collaborate with your team on document signing.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Organization Name</label>
+                <Input
+                  placeholder="e.g., Acme Corp"
+                  value={newOrgName}
+                  onChange={(e) => setNewOrgName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateOrg()}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateOrgDialog(false)}>Cancel</Button>
+              <Button onClick={handleCreateOrg} disabled={!newOrgName.trim() || creatingOrg} className="bg-emerald-600 hover:bg-emerald-700">
+                {creatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 mr-2" /> Create</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Org Settings Dialog */}
+        <Dialog open={store.orgSettingsOpen} onOpenChange={(open) => { if (!open) store.closeOrgSettings(); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-emerald-600" /> Organization Settings
+              </DialogTitle>
+            </DialogHeader>
+
+            {orgDetailLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : orgDetail ? (
+              <div className="space-y-6 max-h-[60vh] overflow-y-auto">
+                {/* Org info */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                      <Building2 className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg">{orgDetail.name}</h3>
+                      <p className="text-sm text-muted-foreground">Created {formatDateOnly(orgDetail.createdAt)}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    <Badge variant="secondary">{orgDetail.members.length} members</Badge>
+                    <Badge variant="secondary">{orgDetail.documentCount} documents</Badge>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Members list */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <Users className="w-4 h-4" /> Members
+                  </h4>
+                  <div className="space-y-2">
+                    {orgDetail.members.map(member => {
+                      const isOwner = member.role === 'owner';
+                      const isAdmin = member.role === 'admin';
+                      const canManage = !isOwner && (orgDetail.ownerId === store.user?.id || isAdmin);
+                      return (
+                        <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
+                          {/* Avatar */}
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                            style={{
+                              backgroundColor: isOwner ? 'rgba(5,150,105,0.15)' : 'rgba(100,100,100,0.1)',
+                              color: isOwner ? '#059669' : undefined,
+                            }}
+                          >
+                            {member.user.name.charAt(0).toUpperCase()}
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium truncate">{member.user.name}</p>
+                              {isOwner && <Crown className="w-3.5 h-3.5 text-emerald-600" />}
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate">{member.user.email}</p>
+                          </div>
+                          {/* Role badge */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge className={
+                              isOwner ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                              isAdmin ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                              'bg-secondary text-secondary-foreground'
+                            }>
+                              {member.role}
+                            </Badge>
+                            {canManage && (
+                              <div className="flex items-center gap-1">
+                                <select
+                                  className="text-xs border rounded px-1 py-0.5 bg-background"
+                                  value={member.role}
+                                  onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}
+                                >
+                                  <option value="member">Member</option>
+                                  <option value="admin">Admin</option>
+                                </select>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-destructive hover:text-destructive"
+                                  onClick={() => handleRemoveMember(member.id)}
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground shrink-0">{formatDateOnly(member.joinedAt)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Invite member */}
+                {(orgDetail.ownerId === store.user?.id || orgDetail.members.some(m => m.user.id === store.user?.id && m.role === 'admin')) && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <UserPlus className="w-4 h-4" /> Invite Member
+                    </h4>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Email address"
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        className="flex-1 h-9 text-sm"
+                        onKeyDown={(e) => e.key === 'Enter' && handleInviteMember()}
+                      />
+                      <select
+                        className="border rounded-md px-2 text-xs bg-background h-9"
+                        value={inviteRole}
+                        onChange={(e) => setInviteRole(e.target.value)}
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <Button
+                        size="sm"
+                        onClick={handleInviteMember}
+                        disabled={!inviteEmail.trim() || inviting}
+                        className="bg-emerald-600 hover:bg-emerald-700 h-9"
+                      >
+                        {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delete org (owner only) */}
+                {orgDetail.ownerId === store.user?.id && (
+                  <>
+                    <Separator />
+                    <div className="space-y-3">
+                      {!deleteOrgConfirm ? (
+                        <Button
+                          variant="outline"
+                          className="w-full text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800"
+                          onClick={() => setDeleteOrgConfirm(true)}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" /> Delete Organization
+                        </Button>
+                      ) : (
+                        <div className="border border-red-200 dark:border-red-800 rounded-lg p-4 space-y-3">
+                          <p className="text-sm text-red-700 dark:text-red-400 font-medium">
+                            <AlertTriangle className="w-4 h-4 inline mr-1" />
+                            This will permanently delete the organization and all its data. This cannot be undone.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setDeleteOrgConfirm(false)} className="flex-1">Cancel</Button>
+                            <Button
+                              size="sm"
+                              className="flex-1 bg-red-600 hover:bg-red-700"
+                              onClick={handleDeleteOrg}
+                              disabled={deletingOrg}
+                            >
+                              {deletingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Trash2 className="w-4 h-4 mr-1" /> Delete</>}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">Failed to load organization details.</p>
+            )}
           </DialogContent>
         </Dialog>
 
@@ -1604,7 +2198,7 @@ export default function Home() {
                   key={tool.type}
                   variant={activeTool === tool.type ? 'default' : 'outline'}
                   className={`w-full justify-start gap-2 ${activeTool === tool.type ? 'bg-emerald-600 hover:bg-emerald-700' : ''}`}
-                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+                  onClick={() => { setActiveTool(activeTool === tool.type ? null : tool.type); setSelectedFieldId(null); setFieldEditDialog(false); }}
                 >
                   <tool.icon className="w-4 h-4" />
                   {tool.label}
@@ -1718,7 +2312,7 @@ export default function Home() {
                   variant={activeTool === tool.type ? 'default' : 'outline'}
                   size="sm"
                   className={`gap-1 ${activeTool === tool.type ? 'bg-emerald-600' : ''}`}
-                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+                  onClick={() => { setActiveTool(activeTool === tool.type ? null : tool.type); setSelectedFieldId(null); setFieldEditDialog(false); }}
                 >
                   <tool.icon className="w-4 h-4" /> {tool.label}
                 </Button>
@@ -1727,7 +2321,7 @@ export default function Home() {
           </div>
 
           {/* PDF Area */}
-          <div className="flex-1 overflow-auto p-4 space-y-6 pb-24 lg:pb-4">
+          <div className="flex-1 overflow-auto p-4 space-y-6 pb-24 lg:pb-4" ref={editorContainerRef}>
             {pdfLoading ? (
               <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
             ) : (
@@ -1737,9 +2331,11 @@ export default function Home() {
                   <div key={idx} className="space-y-2">
                     <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {pdfPages.length}</p>
                     <div
+                      data-page
                       className={`relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white ${activeTool ? 'cursor-crosshair' : ''}`}
                       style={{ maxWidth: 612 }}
                       onClick={(e) => {
+                        if (isDragging) return;
                         const target = e.target as HTMLElement;
                         if (target.closest('[data-field]')) return;
                         handlePageClick(e, idx);
@@ -1750,45 +2346,52 @@ export default function Home() {
                         <div
                           key={field.id}
                           data-field
-                          className={`absolute border-2 rounded flex items-center justify-center transition-all group/field ${
+                          className={`absolute border-2 rounded flex items-center justify-center transition-all group/field select-none ${
+                            selectedFieldId === field.id ? 'ring-2 ring-emerald-500 ring-offset-1' : ''
+                          } ${
                             field.type === 'signature' ? 'border-emerald-400 bg-emerald-50/70' :
                             field.type === 'date' ? 'border-amber-400 bg-amber-50/70' :
                             'border-neutral-400 bg-neutral-50/70'
-                          } ${field.signerColor ? 'ring-2' : ''}`}
+                          } ${field.signerColor ? 'ring-2' : ''} ${draggingField === field.id ? 'opacity-80 shadow-lg z-20' : ''}`}
                           style={{
                             left: `${(field.x / 612) * 100}%`,
                             top: `${(field.y / 792) * 100}%`,
                             width: `${(field.width / 612) * 100}%`,
                             height: `${(field.height / 792) * 100}%`,
-                            ringColor: field.signerColor,
+                            ...(field.signerColor ? { '--tw-ring-color': field.signerColor } as React.CSSProperties : {}),
+                            cursor: activeTool ? undefined : (draggingField === field.id ? 'grabbing' : 'grab'),
                           }}
-                          onMouseDown={(e) => handleFieldDragStart(field.id, e)}
+                          onMouseDown={(e) => handleFieldMouseDown(field.id, e)}
                         >
+                          <GripVertical className="w-3 h-3 text-muted-foreground/50 absolute top-0.5 left-0.5 hidden group-hover/field:block" />
                           <div className="flex items-center gap-1 px-1">
                             {field.type === 'signature' && <PenLine className="w-3 h-3 text-emerald-600" />}
                             {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
                             {field.type === 'text' && <Type className="w-3 h-3 text-neutral-600" />}
                             <span className="text-[10px] font-medium truncate">
-                              {field.signerName || field.type}
+                              {field.label || field.signerName || field.type}
                             </span>
+                            {field.required && <span className="text-red-500 text-[10px]">*</span>}
                           </div>
                           {/* Assign signer dropdown */}
-                          <div className="absolute top-full left-0 mt-1 bg-popover border rounded shadow-lg p-1 hidden group-hover/field:block z-10 min-w-[140px]">
-                            {tempSigners.map((s, si) => (
-                              <button
-                                key={si}
-                                className="w-full text-left px-2 py-1 text-xs hover:bg-muted rounded flex items-center gap-2"
-                                onClick={(e) => { e.stopPropagation(); handleAssignSigner(field.id, si); }}
-                              >
-                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                                {s.name}
-                                {field.signerId === `temp-${si}` && <Check className="w-3 h-3 ml-auto text-emerald-600" />}
-                              </button>
-                            ))}
-                            {tempSigners.length === 0 && (
-                              <p className="text-xs text-muted-foreground px-2 py-1">Add signers first</p>
-                            )}
-                          </div>
+                          {!activeTool && (
+                            <div className="absolute top-full left-0 mt-1 bg-popover border rounded shadow-lg p-1 hidden group-hover/field:block z-10 min-w-[140px]">
+                              {tempSigners.map((s, si) => (
+                                <button
+                                  key={si}
+                                  className="w-full text-left px-2 py-1 text-xs hover:bg-muted rounded flex items-center gap-2"
+                                  onClick={(e) => { e.stopPropagation(); handleAssignSigner(field.id, si); }}
+                                >
+                                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                                  {s.name}
+                                  {field.signerId === `temp-${si}` && <Check className="w-3 h-3 ml-auto text-emerald-600" />}
+                                </button>
+                              ))}
+                              {tempSigners.length === 0 && (
+                                <p className="text-xs text-muted-foreground px-2 py-1">Add signers first</p>
+                              )}
+                            </div>
+                          )}
                           {/* Delete button */}
                           <button
                             className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover/field:opacity-100 transition-opacity"
@@ -1850,6 +2453,126 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Field Edit Dialog */}
+        <Dialog open={fieldEditDialog} onOpenChange={(open) => { if (!open) { setFieldEditDialog(false); setSelectedFieldId(null); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-emerald-600" /> Edit Field
+              </DialogTitle>
+              <DialogDescription>
+                Configure the field properties for this signing field.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedFieldForEdit && (
+              <div className="space-y-4">
+                {/* Field type (read-only) */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Type</label>
+                  <Badge className={
+                    selectedFieldForEdit.type === 'signature' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                    selectedFieldForEdit.type === 'date' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                    'bg-secondary text-secondary-foreground'
+                  }>
+                    {selectedFieldForEdit.type === 'signature' && <PenLine className="w-3 h-3 mr-1" />}
+                    {selectedFieldForEdit.type === 'date' && <CalendarDays className="w-3 h-3 mr-1" />}
+                    {selectedFieldForEdit.type === 'text' && <Type className="w-3 h-3 mr-1" />}
+                    {selectedFieldForEdit.type.charAt(0).toUpperCase() + selectedFieldForEdit.type.slice(1)}
+                  </Badge>
+                </div>
+
+                {/* Label */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Label</label>
+                  <Input
+                    placeholder="e.g., Signature of CEO"
+                    value={editFieldLabel}
+                    onChange={(e) => setEditFieldLabel(e.target.value)}
+                  />
+                </div>
+
+                {/* Required toggle */}
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Required</label>
+                  <button
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editFieldRequired ? 'bg-emerald-600' : 'bg-muted'}`}
+                    onClick={() => setEditFieldRequired(!editFieldRequired)}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow ${editFieldRequired ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                {/* Width & Height */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Width (pts)</label>
+                    <Input
+                      type="number"
+                      min={20}
+                      max={612}
+                      value={editFieldWidth}
+                      onChange={(e) => setEditFieldWidth(Math.max(20, Math.min(612, parseInt(e.target.value) || 20)))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Height (pts)</label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={792}
+                      value={editFieldHeight}
+                      onChange={(e) => setEditFieldHeight(Math.max(10, Math.min(792, parseInt(e.target.value) || 10)))}
+                    />
+                  </div>
+                </div>
+
+                {/* Signer assignment */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Assign to Signer</label>
+                  <select
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                    value={editFieldSignerId || ''}
+                    onChange={(e) => setEditFieldSignerId(e.target.value || null)}
+                  >
+                    <option value="">Unassigned</option>
+                    {tempSigners.map((s, i) => (
+                      <option key={i} value={`temp-${i}`}>{s.name} ({s.email})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Position info */}
+                <div className="text-xs text-muted-foreground">
+                  Position: X={Math.round(selectedFieldForEdit.x)}, Y={Math.round(selectedFieldForEdit.y)} · Page {selectedFieldForEdit.pageNumber}
+                </div>
+              </div>
+            )}
+            <DialogFooter className="flex items-center justify-between sm:justify-between">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20"
+                onClick={async () => {
+                  if (selectedFieldId) {
+                    await handleDeleteField(selectedFieldId);
+                    setFieldEditDialog(false);
+                  }
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-1" /> Delete
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setFieldEditDialog(false); setSelectedFieldId(null); }}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSaveFieldEdit} disabled={savingField} className="bg-emerald-600 hover:bg-emerald-700">
+                  {savingField ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4 mr-1" /> Save</>}
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Save Template Dialog */}
         <Dialog open={saveTemplateDialog} onOpenChange={setSaveTemplateDialog}>
@@ -2028,7 +2751,6 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {/* Rejection status for signer */}
                       {signer.rejectedAt && (
                         <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
                           <XCircle className="w-3 h-3 mr-1" /> Rejected
@@ -2122,7 +2844,7 @@ export default function Home() {
                           ) : field.value ? (
                             <span className="text-xs font-medium truncate">{field.value}</span>
                           ) : (
-                            <span className="text-[10px] text-muted-foreground capitalize">{field.type}</span>
+                            <span className="text-[10px] text-muted-foreground capitalize">{field.label || field.type}</span>
                           )}
                         </div>
                       ))}
@@ -2164,7 +2886,7 @@ export default function Home() {
                 )}
                 <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                    🔒 ESIGN/eIDAS Compliant Audit Trail — All actions are cryptographically recorded with timestamps and IP addresses.
+                    ESIGN/eIDAS Compliant Audit Trail — All actions are cryptographically recorded with timestamps and IP addresses.
                   </p>
                 </div>
               </CardContent>

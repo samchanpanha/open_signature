@@ -105,4 +105,39 @@ Stage Summary:
 - Database reset and re-migrated successfully
 - All API routes tested and working
 - Frontend updated with all new modules
-- Verified: dark mode, search, status filters, duplication, CC recipients, expiry, sign yourself, templates, rejection, certificate
+- Verified: dark mode, search, status filters, duplication, CC recipients, expiry, sign yourself, templates, rejection, certificate---
+Task ID: 1
+Agent: main
+Task: Add drag-to-move fields, field edit/delete, multi-tenant organizations, and member management
+
+Work Log:
+- Read existing codebase: schema, store, api.ts, page.tsx (~2183 lines), all API routes
+- Updated Prisma schema: added Organization and OrganizationMember models, added organizationId to Document and label/required to DocumentField
+- Ran db push to apply schema changes
+- Created 4 new API routes: organizations (GET/POST), organizations/[id] (GET/DELETE), organizations/[id]/members (GET/POST), organizations/[id]/members/[memberId] (PUT/DELETE)
+- Updated documents API: org-scoped filtering via orgId query param, orgId support in document creation
+- Updated fields API: full CRUD with label, required, width, height, x, y support in both create and update
+- Updated api.ts client: added orgApi, enhanced fieldsApi with label/required/width/height, documentsApi now accepts orgId
+- Updated store.ts: added currentOrgId, orgSettingsOpen, orgSettingsOrgId states
+- Rewrote page.tsx (~2904 lines) via subagent with all new features
+- Regenerated Prisma client and restarted dev server
+- Browser-verified all features:
+  - Dashboard renders with org selector ("Personal" button in header)
+  - Create Organization dialog: created "Acme Corp" successfully
+  - Org dropdown shows orgs with member counts
+  - Org switching: "Acme Corp" selected → empty docs view; "Personal" → personal docs
+  - Org Settings dialog: shows members, invite form (email + role dropdown), delete org button
+  - Editor: placed signature field, opened edit dialog
+  - Field Edit Dialog: label input, required toggle, width/height spinners, signer assignment, delete button
+  - Field label saved as "CEO Signature*" - persisted to DB via PUT /api/fields
+  - Field deleted via edit dialog - DELETE /api/fields returned 200
+  - All API calls returning 200, zero errors in dev log
+  - ESLint passes clean
+
+Stage Summary:
+- Multi-tenant organizations fully implemented (create, switch, settings, member management)
+- Field drag-to-move implemented with mouse tracking, position persistence, and click vs drag detection
+- Field edit dialog with label, required, size, and signer assignment controls
+- Field deletion via both hover X button and edit dialog
+- Document scoping by organization working
+- All existing features (auth, dashboard, editor, viewer, signing) preserved and working

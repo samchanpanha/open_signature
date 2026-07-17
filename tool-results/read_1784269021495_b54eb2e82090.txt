@@ -1,0 +1,502 @@
+  1200→  1200→            </div>
+  1201→  1201→          </div>
+  1202→  1202→        )}
+  1203→  1203→
+  1204→  1204→        {/* Reject Dialog */}
+  1205→  1205→        <Dialog open={rejectDialog} onOpenChange={setRejectDialog}>
+  1206→  1206→          <DialogContent>
+  1207→  1207→            <DialogHeader>
+  1208→  1208→              <DialogTitle className="flex items-center gap-2 text-red-600">
+  1209→  1209→                <XCircle className="w-5 h-5" /> Reject Document
+  1210→  1210→              </DialogTitle>
+  1211→  1211→              <DialogDescription>
+  1212→  1212→                This action cannot be undone. Please provide a reason for rejecting this document.
+  1213→  1213→              </DialogDescription>
+  1214→  1214→            </DialogHeader>
+  1215→  1215→            <div className="space-y-3">
+  1216→  1216→              <textarea
+  1217→  1217→                className="w-full min-h-[100px] rounded-lg border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+  1218→  1218→                placeholder="Reason for rejection..."
+  1219→  1219→                value={rejectReason}
+  1220→  1220→                onChange={(e) => setRejectReason(e.target.value)}
+  1221→  1221→              />
+  1222→  1222→            </div>
+  1223→  1223→            <DialogFooter>
+  1224→  1224→              <Button variant="outline" onClick={() => setRejectDialog(false)}>Cancel</Button>
+  1225→  1225→              <Button
+  1226→  1226→                onClick={handleReject}
+  1227→  1227→                disabled={rejecting || !rejectReason.trim()}
+  1228→  1228→                className="bg-red-600 hover:bg-red-700 text-white"
+  1229→  1229→              >
+  1230→  1230→                {rejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Ban className="w-4 h-4 mr-2" /> Reject Document</>}
+  1231→  1231→              </Button>
+  1232→  1232→            </DialogFooter>
+  1233→  1233→          </DialogContent>
+  1234→  1234→        </Dialog>
+  1235→  1235→
+  1236→  1236→        <footer className="border-t py-3 text-center text-xs text-muted-foreground sticky bottom-0 bg-background">
+  1237→  1237→          Secured by OpenSign-compliant cryptographic sealing
+  1238→  1238→        </footer>
+  1239→  1239→      </div>
+  1240→  1240→    );
+  1241→  1241→  }
+  1242→  1242→
+  1243→  1243→  // === AUTH VIEW ===
+  1244→  1244→  if (store.currentView === 'auth' || !store.user) {
+  1245→  1245→    return (
+  1246→  1246→      <div className="min-h-screen flex flex-col bg-background">
+  1247→  1247→        <main className="flex-1 flex items-center justify-center p-4">
+  1248→  1248→          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full max-w-md">
+  1249→  1249→            {/* Hero */}
+  1250→  1250→            <div className="text-center mb-8">
+  1251→  1251→              <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-600/20">
+  1252→  1252→                <FileSignature className="w-9 h-9 text-white" />
+  1253→  1253→              </div>
+  1254→  1254→              <h1 className="text-3xl font-bold tracking-tight">OpenSign</h1>
+  1255→  1255→              <p className="text-muted-foreground mt-2">Secure document signing. Cryptographically sealed. ESIGN compliant.</p>
+  1256→  1256→              <div className="flex justify-center mt-3">
+  1257→  1257→                <ThemeToggle />
+  1258→  1258→              </div>
+  1259→  1259→            </div>
+  1260→  1260→
+  1261→  1261→            <Card className="shadow-lg">
+  1262→  1262→              <CardHeader className="pb-2">
+  1263→  1263→                <Tabs value={authMode} onValueChange={(v) => setAuthMode(v as 'login' | 'register')}>
+  1264→  1264→                  <TabsList className="grid w-full grid-cols-2">
+  1265→  1265→                    <TabsTrigger value="login">Sign In</TabsTrigger>
+  1266→  1266→                    <TabsTrigger value="register">Register</TabsTrigger>
+  1267→  1267→                  </TabsList>
+  1268→  1268→                </Tabs>
+  1269→  1269→              </CardHeader>
+  1270→  1270→              <CardContent className="pt-4 space-y-4">
+  1271→  1271→                {authMode === 'register' && (
+  1272→  1272→                  <div className="space-y-2">
+  1273→  1273→                    <label className="text-sm font-medium">Full Name</label>
+  1274→  1274→                    <Input placeholder="John Doe" value={authName} onChange={(e) => setAuthName(e.target.value)} />
+  1275→  1275→                  </div>
+  1276→  1276→                )}
+  1277→  1277→                <div className="space-y-2">
+  1278→  1278→                  <label className="text-sm font-medium">Email</label>
+  1279→  1279→                  <Input type="email" placeholder="you@example.com" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+  1280→  1280→                </div>
+  1281→  1281→                <div className="space-y-2">
+  1282→  1282→                  <label className="text-sm font-medium">Password</label>
+  1283→  1283→                  <Input type="password" placeholder="••••••••" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAuth()} />
+  1284→  1284→                </div>
+  1285→  1285→                <Button onClick={handleAuth} disabled={authLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
+  1286→  1286→                  {authLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : authMode === 'login' ? 'Sign In' : 'Create Account'}
+  1287→  1287→                </Button>
+  1288→  1288→              </CardContent>
+  1289→  1289→            </Card>
+  1290→  1290→
+  1291→  1291→            <div className="flex items-center justify-center gap-6 mt-6 text-xs text-muted-foreground">
+  1292→  1292→              <div className="flex items-center gap-1"><Shield className="w-3.5 h-3.5" /> AES-256 Encrypted</div>
+  1293→  1293→              <div className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> ESIGN Compliant</div>
+  1294→  1294→              <div className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Audit Trail</div>
+  1295→  1295→            </div>
+  1296→  1296→          </motion.div>
+  1297→  1297→        </main>
+  1298→  1298→        <footer className="border-t py-4 text-center text-xs text-muted-foreground">
+  1299→  1299→          OpenSign-compliant PDF Signing Platform
+  1300→  1300→        </footer>
+  1301→  1301→      </div>
+  1302→  1302→    );
+  1303→  1303→  }
+  1304→  1304→
+  1305→  1305→  // === DASHBOARD VIEW ===
+  1306→  1306→  if (store.currentView === 'dashboard') {
+  1307→  1307→    return (
+  1308→  1308→      <div className="min-h-screen flex flex-col bg-background">
+  1309→  1309→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+  1310→  1310→          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+  1311→  1311→            <div className="flex items-center gap-3">
+  1312→  1312→              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+  1313→  1313→                <FileSignature className="w-5 h-5 text-white" />
+  1314→  1314→              </div>
+  1315→  1315→              <span className="font-bold text-lg">OpenSign</span>
+  1316→  1316→            </div>
+  1317→  1317→            <div className="flex items-center gap-2">
+  1318→  1318→              <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
+  1319→  1319→              <ThemeToggle />
+  1320→  1320→              <Button variant="ghost" size="sm" onClick={store.logout}>
+  1321→  1321→                <LogOut className="w-4 h-4" />
+  1322→  1322→              </Button>
+  1323→  1323→            </div>
+  1324→  1324→          </div>
+  1325→  1325→        </header>
+  1326→  1326→
+  1327→  1327→        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 space-y-6">
+  1328→  1328→          {/* Templates Section */}
+  1329→  1329→          {templates.length > 0 && (
+  1330→  1330→            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+  1331→  1331→              <button
+  1332→  1332→                className="flex items-center gap-2 text-sm font-semibold mb-3 w-full text-left"
+  1333→  1333→                onClick={() => setTemplatesOpen(!templatesOpen)}
+  1334→  1334→              >
+  1335→  1335→                <BookmarkPlus className="w-4 h-4 text-emerald-600" />
+  1336→  1336→                Templates ({templates.length})
+  1337→  1337→                <ChevronDown className={`w-4 h-4 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} />
+  1338→  1338→              </button>
+  1339→  1339→              <AnimatePresence>
+  1340→  1340→                {templatesOpen && (
+  1341→  1341→                  <motion.div
+  1342→  1342→                    initial={{ height: 0, opacity: 0 }}
+  1343→  1343→                    animate={{ height: 'auto', opacity: 1 }}
+  1344→  1344→                    exit={{ height: 0, opacity: 0 }}
+  1345→  1345→                    className="overflow-hidden"
+  1346→  1346→                  >
+  1347→  1347→                    <div className="flex gap-3 pb-4 overflow-x-auto">
+  1348→  1348→                      {templates.map(t => (
+  1349→  1349→                        <div
+  1350→  1350→                          key={t.id}
+  1351→  1351→                          className="flex-shrink-0 border rounded-lg p-3 bg-card hover:shadow-sm transition-shadow min-w-[160px] max-w-[200px] relative group"
+  1352→  1352→                        >
+  1353→  1353→                          <div className="flex items-center justify-between mb-1">
+  1354→  1354→                            <span className="text-sm font-medium truncate">{t.name}</span>
+  1355→  1355→                            <button
+  1356→  1356→                              className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+  1357→  1357→                              onClick={() => handleDeleteTemplate(t.id)}
+  1358→  1358→                            >
+  1359→  1359→                              <X className="w-3.5 h-3.5" />
+  1360→  1360→                            </button>
+  1361→  1361→                          </div>
+  1362→  1362→                          <p className="text-xs text-muted-foreground">{t.fieldConfig.length} field{t.fieldConfig.length !== 1 ? 's' : ''}</p>
+  1363→  1363→                          <p className="text-xs text-muted-foreground">{formatDateOnly(t.createdAt)}</p>
+  1364→  1364→                        </div>
+  1365→  1365→                      ))}
+  1366→  1366→                    </div>
+  1367→  1367→                  </motion.div>
+  1368→  1368→                )}
+  1369→  1369→              </AnimatePresence>
+  1370→  1370→            </motion.div>
+  1371→  1371→          )}
+  1372→  1372→
+  1373→  1373→          {/* Search and Actions */}
+  1374→  1374→          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+  1375→  1375→            <div>
+  1376→  1376→              <h1 className="text-2xl font-bold">Documents</h1>
+  1377→  1377→              <p className="text-sm text-muted-foreground">Manage and send documents for signing</p>
+  1378→  1378→            </div>
+  1379→  1379→            <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+  1380→  1380→              <Plus className="w-4 h-4 mr-2" /> New Document
+  1381→  1381→            </Button>
+  1382→  1382→          </div>
+  1383→  1383→
+  1384→  1384→          {/* Search Bar */}
+  1385→  1385→          <div className="relative">
+  1386→  1386→            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+  1387→  1387→            <Input
+  1388→  1388→              placeholder="Search documents by title..."
+  1389→  1389→              value={searchQuery}
+  1390→  1390→              onChange={(e) => setSearchQuery(e.target.value)}
+  1391→  1391→              className="pl-10"
+  1392→  1392→            />
+  1393→  1393→          </div>
+  1394→  1394→
+  1395→  1395→          {/* Status Filter Tabs */}
+  1396→  1396→          <div className="flex gap-1 overflow-x-auto pb-1">
+  1397→  1397→            {STATUS_TABS.map(tab => (
+  1398→  1398→              <button
+  1399→  1399→                key={tab}
+  1400→  1400→                className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap transition-colors ${
+  1401→  1401→                  statusFilter === tab
+  1402→  1402→                    ? 'bg-emerald-600 text-white'
+  1403→  1403→                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+  1404→  1404→                }`}
+  1405→  1405→                onClick={() => setStatusFilter(tab)}
+  1406→  1406→              >
+  1407→  1407→                {tab}
+  1408→  1408→              </button>
+  1409→  1409→            ))}
+  1410→  1410→          </div>
+  1411→  1411→
+  1412→  1412→          {dashLoading ? (
+  1413→  1413→            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+  1414→  1414→          ) : filteredDocuments.length === 0 ? (
+  1415→  1415→            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
+  1416→  1416→              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+  1417→  1417→                <FileText className="w-8 h-8 text-muted-foreground" />
+  1418→  1418→              </div>
+  1419→  1419→              <h3 className="text-lg font-semibold mb-1">
+  1420→  1420→                {documents.length === 0 ? 'No documents yet' : 'No matching documents'}
+  1421→  1421→              </h3>
+  1422→  1422→              <p className="text-sm text-muted-foreground mb-4">
+  1423→  1423→                {documents.length === 0 ? 'Upload a PDF to get started with document signing' : 'Try adjusting your search or filter'}
+  1424→  1424→              </p>
+  1425→  1425→              {documents.length === 0 && (
+  1426→  1426→                <Button variant="outline" onClick={() => setUploadDialog(true)}>
+  1427→  1427→                  <Upload className="w-4 h-4 mr-2" /> Upload PDF
+  1428→  1428→                </Button>
+  1429→  1429→              )}
+  1430→  1430→            </motion.div>
+  1431→  1431→          ) : (
+  1432→  1432→            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  1433→  1433→              {filteredDocuments.map((doc, i) => (
+  1434→  1434→                <motion.div
+  1435→  1435→                  key={doc.id}
+  1436→  1436→                  initial={{ y: 10, opacity: 0 }}
+  1437→  1437→                  animate={{ y: 0, opacity: 1 }}
+  1438→  1438→                  transition={{ delay: i * 0.05 }}
+  1439→  1439→                >
+  1440→  1440→                  <Card
+  1441→  1441→                    className="cursor-pointer hover:shadow-md transition-shadow group"
+  1442→  1442→                    onClick={() => {
+  1443→  1443→                      if (doc.status === 'Draft') {
+  1444→  1444→                        store.setEditingDocument(doc.id);
+  1445→  1445→                        store.setView('editor');
+  1446→  1446→                      } else {
+  1447→  1447→                        store.setViewingDocument(doc.id);
+  1448→  1448→                        store.setView('viewer');
+  1449→  1449→                      }
+  1450→  1450→                    }}
+  1451→  1451→                  >
+  1452→  1452→                    <CardHeader className="pb-3">
+  1453→  1453→                      <div className="flex items-start justify-between">
+  1454→  1454→                        <div className="flex items-center gap-3">
+  1455→  1455→                          <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center group-hover:bg-emerald-50 transition-colors">
+  1456→  1456→                            <FileText className="w-5 h-5 text-muted-foreground" />
+  1457→  1457→                          </div>
+  1458→  1458→                          <div className="min-w-0">
+  1459→  1459→                            <CardTitle className="text-sm font-semibold truncate">{doc.title}</CardTitle>
+  1460→  1460→                            <p className="text-xs text-muted-foreground">{formatDate(doc.createdAt)}</p>
+  1461→  1461→                          </div>
+  1462→  1462→                        </div>
+  1463→  1463→                        <div className="flex items-center gap-1">
+  1464→  1464→                          <StatusBadge status={doc.status} />
+  1465→  1465→                        </div>
+  1466→  1466→                      </div>
+  1467→  1467→                    </CardHeader>
+  1468→  1468→                    <CardContent className="pt-0">
+  1469→  1469→                      {doc.signerCount > 0 && (
+  1470→  1470→                        <div className="flex items-center justify-between mb-2">
+  1471→  1471→                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+  1472→  1472→                            <Users className="w-3.5 h-3.5" />
+  1473→  1473→                            {doc.signedCount}/{doc.signerCount} signed
+  1474→  1474→                          </div>
+  1475→  1475→                          <Progress value={(doc.signedCount / doc.signerCount) * 100} className="h-1.5 w-20" />
+  1476→  1476→                        </div>
+  1477→  1477→                      )}
+  1478→  1478→                      {/* Action buttons */}
+  1479→  1479→                      <div className="flex items-center gap-1">
+  1480→  1480→                        {doc.status === 'Draft' && (
+  1481→  1481→                          <Button
+  1482→  1482→                            variant="ghost"
+  1483→  1483→                            size="icon"
+  1484→  1484→                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+  1485→  1485→                            onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}
+  1486→  1486→                          >
+  1487→  1487→                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+  1488→  1488→                          </Button>
+  1489→  1489→                        )}
+  1490→  1490→                        <Button
+  1491→  1491→                          variant="ghost"
+  1492→  1492→                          size="icon"
+  1493→  1493→                          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+  1494→  1494→                          onClick={(e) => handleDuplicateDoc(e, doc.id)}
+  1495→  1495→                          title="Duplicate document"
+  1496→  1496→                        >
+  1497→  1497→                          <CopyPlus className="w-3.5 h-3.5" />
+  1498→  1498→                        </Button>
+  1499→  1499→                      </div>
+  1500→  1500→                    </CardContent>
+  1501→  1501→                  </Card>
+  1502→  1502→                </motion.div>
+  1503→  1503→              ))}
+  1504→  1504→            </div>
+  1505→  1505→          )}
+  1506→  1506→        </main>
+  1507→  1507→
+  1508→  1508→        {/* Upload Dialog */}
+  1509→  1509→        <Dialog open={uploadDialog} onOpenChange={setUploadDialog}>
+  1510→  1510→          <DialogContent>
+  1511→  1511→            <DialogHeader>
+  1512→  1512→              <DialogTitle>Upload Document</DialogTitle>
+  1513→  1513→            </DialogHeader>
+  1514→  1514→            <div className="space-y-4">
+  1515→  1515→              <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-emerald-400 transition-colors"
+  1516→  1516→                onClick={() => document.getElementById('pdf-upload')?.click()}
+  1517→  1517→              >
+  1518→  1518→                {uploadFile ? (
+  1519→  1519→                  <div className="flex items-center justify-center gap-2">
+  1520→  1520→                    <FileText className="w-5 h-5 text-emerald-600" />
+  1521→  1521→                    <span className="text-sm font-medium">{uploadFile.name}</span>
+  1522→  1522→                  </div>
+  1523→  1523→                ) : (
+  1524→  1524→                  <>
+  1525→  1525→                    <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+  1526→  1526→                    <p className="text-sm text-muted-foreground">Click to select a PDF file</p>
+  1527→  1527→                  </>
+  1528→  1528→                )}
+  1529→  1529→                <input id="pdf-upload" type="file" accept=".pdf" className="hidden" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
+  1530→  1530→              </div>
+  1531→  1531→              <div className="space-y-2">
+  1532→  1532→                <label className="text-sm font-medium">Document Title</label>
+  1533→  1533→                <Input placeholder="Enter document title..." value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} />
+  1534→  1534→              </div>
+  1535→  1535→            </div>
+  1536→  1536→            <DialogFooter>
+  1537→  1537→              <Button variant="outline" onClick={() => setUploadDialog(false)}>Cancel</Button>
+  1538→  1538→              <Button onClick={handleUpload} disabled={!uploadFile || uploading} className="bg-emerald-600 hover:bg-emerald-700">
+  1539→  1539→                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4 mr-2" /> Upload</>}
+  1540→  1540→              </Button>
+  1541→  1541→            </DialogFooter>
+  1542→  1542→          </DialogContent>
+  1543→  1543→        </Dialog>
+  1544→  1544→
+  1545→  1545→        <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto">
+  1546→  1546→          OpenSign-compliant PDF Signing Platform
+  1547→  1547→        </footer>
+  1548→  1548→      </div>
+  1549→  1549→    );
+  1550→  1550→  }
+  1551→  1551→
+  1552→  1552→  // === EDITOR VIEW ===
+  1553→  1553→  if (store.currentView === 'editor') {
+  1554→  1554→    if (editorLoading) {
+  1555→  1555→      return (
+  1556→  1556→        <div className="min-h-screen flex items-center justify-center">
+  1557→  1557→          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+  1558→  1558→        </div>
+  1559→  1559→      );
+  1560→  1560→    }
+  1561→  1561→
+  1562→  1562→    if (!editorDoc) return null;
+  1563→  1563→
+  1564→  1564→    const assignedCount = placedFields.filter(f => f.signerId).length;
+  1565→  1565→    const canSend = tempSigners.length > 0 && assignedCount > 0;
+  1566→  1566→
+  1567→  1567→    return (
+  1568→  1568→      <div className="min-h-screen flex flex-col bg-background">
+  1569→  1569→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+  1570→  1570→          <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
+  1571→  1571→            <div className="flex items-center gap-3">
+  1572→  1572→              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setEditingDocument(null); }}>
+  1573→  1573→                <ArrowLeft className="w-4 h-4" />
+  1574→  1574→              </Button>
+  1575→  1575→              <div>
+  1576→  1576→                <h1 className="font-semibold text-sm truncate max-w-[200px] sm:max-w-none">{editorDoc.title}</h1>
+  1577→  1577→                <div className="flex items-center gap-2">
+  1578→  1578→                  <StatusBadge status={editorDoc.status} />
+  1579→  1579→                  <span className="text-xs text-muted-foreground">{pdfPages.length} page{pdfPages.length !== 1 ? 's' : ''}</span>
+  1580→  1580→                </div>
+  1581→  1581→              </div>
+  1582→  1582→            </div>
+  1583→  1583→            <div className="flex items-center gap-2">
+  1584→  1584→              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+  1585→  1585→                {tempSigners.length > 0 && <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>}
+  1586→  1586→                {assignedCount > 0 && <span>· {assignedCount} field{assignedCount !== 1 ? 's' : ''} assigned</span>}
+  1587→  1587→              </div>
+  1588→  1588→              <ThemeToggle />
+  1589→  1589→            </div>
+  1590→  1590→          </div>
+  1591→  1591→        </header>
+  1592→  1592→
+  1593→  1593→        <div className="flex-1 flex overflow-hidden">
+  1594→  1594→          {/* Left sidebar: Field tools */}
+  1595→  1595→          <div className="w-56 border-r bg-muted/30 p-4 space-y-4 hidden lg:flex flex-col overflow-y-auto">
+  1596→  1596→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Field Types</h3>
+  1597→  1597→            <div className="space-y-2">
+  1598→  1598→              {([
+  1599→  1599→                { type: 'signature' as const, icon: PenLine, label: 'Signature', color: 'emerald' },
+  1600→  1600→                { type: 'date' as const, icon: CalendarDays, label: 'Date', color: 'amber' },
+  1601→  1601→                { type: 'text' as const, icon: Type, label: 'Text', color: 'neutral' },
+  1602→  1602→              ]).map(tool => (
+  1603→  1603→                <Button
+  1604→  1604→                  key={tool.type}
+  1605→  1605→                  variant={activeTool === tool.type ? 'default' : 'outline'}
+  1606→  1606→                  className={`w-full justify-start gap-2 ${activeTool === tool.type ? 'bg-emerald-600 hover:bg-emerald-700' : ''}`}
+  1607→  1607→                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+  1608→  1608→                >
+  1609→  1609→                  <tool.icon className="w-4 h-4" />
+  1610→  1610→                  {tool.label}
+  1611→  1611→                  {activeTool === tool.type && <MousePointer className="w-3 h-3 ml-auto" />}
+  1612→  1612→                </Button>
+  1613→  1613→              ))}
+  1614→  1614→            </div>
+  1615→  1615→
+  1616→  1616→            <Separator />
+  1617→  1617→
+  1618→  1618→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Signers</h3>
+  1619→  1619→            <div className="space-y-2">
+  1620→  1620→              {tempSigners.map((signer, i) => (
+  1621→  1621→                <div
+  1622→  1622→                  key={i}
+  1623→  1623→                  className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors text-sm ${activeSignerId === `temp-${i}` ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+  1624→  1624→                  onClick={() => setActiveSignerId(activeSignerId === `temp-${i}` ? null : `temp-${i}`)}
+  1625→  1625→                >
+  1626→  1626→                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: signer.color }} />
+  1627→  1627→                  <div className="min-w-0 flex-1">
+  1628→  1628→                    <p className="truncate text-xs font-medium">{signer.name}</p>
+  1629→  1629→                    <p className="truncate text-xs opacity-70">{signer.email}</p>
+  1630→  1630→                  </div>
+  1631→  1631→                  <Button
+  1632→  1632→                    variant="ghost"
+  1633→  1633→                    size="icon"
+  1634→  1634→                    className="h-5 w-5"
+  1635→  1635→                    onClick={(e) => { e.stopPropagation(); setTempSigners(tempSigners.filter((_, j) => j !== i)); }}
+  1636→  1636→                  >
+  1637→  1637→                    <X className="w-3 h-3" />
+  1638→  1638→                  </Button>
+  1639→  1639→                </div>
+  1640→  1640→              ))}
+  1641→  1641→              <div className="space-y-1.5">
+  1642→  1642→                <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs" />
+  1643→  1643→                <Input placeholder="Email" type="email" value={newSignerEmail} onChange={(e) => setNewSignerEmail(e.target.value)} className="h-8 text-xs" onKeyDown={(e) => e.key === 'Enter' && addSigner()} />
+  1644→  1644→                <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={addSigner} disabled={!newSignerName.trim() || !newSignerEmail.trim()}>
+  1645→  1645→                  <Plus className="w-3 h-3 mr-1" /> Add Signer
+  1646→  1646→                </Button>
+  1647→  1647→              </div>
+  1648→  1648→            </div>
+  1649→  1649→
+  1650→  1650→            <Separator />
+  1651→  1651→
+  1652→  1652→            {/* CC Recipients */}
+  1653→  1653→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CC Recipients</h3>
+  1654→  1654→            <div className="space-y-2">
+  1655→  1655→              {ccRecipients.map((cc, i) => (
+  1656→  1656→                <div key={i} className="flex items-center gap-2 text-xs p-1.5 bg-muted rounded-md">
+  1657→  1657→                  <div className="w-3 h-3 rounded-full bg-muted-foreground/30 shrink-0" />
+  1658→  1658→                  <div className="min-w-0 flex-1 truncate">
+  1659→  1659→                    <span className="font-medium">{cc.name}</span>
+  1660→  1660→                    <span className="text-muted-foreground ml-1">({cc.email})</span>
+  1661→  1661→                  </div>
+  1662→  1662→                  <button
+  1663→  1663→                    className="text-muted-foreground hover:text-destructive"
+  1664→  1664→                    onClick={() => setCcRecipients(ccRecipients.filter((_, j) => j !== i))}
+  1665→  1665→                  >
+  1666→  1666→                    <X className="w-3 h-3" />
+  1667→  1667→                  </button>
+  1668→  1668→                </div>
+  1669→  1669→              ))}
+  1670→  1670→              <div className="space-y-1.5">
+  1671→  1671→                <Input placeholder="CC Name" value={newCcName} onChange={(e) => setNewCcName(e.target.value)} className="h-7 text-xs" />
+  1672→  1672→                <Input placeholder="CC Email" type="email" value={newCcEmail} onChange={(e) => setNewCcEmail(e.target.value)} className="h-7 text-xs" onKeyDown={(e) => e.key === 'Enter' && addCcRecipient()} />
+  1673→  1673→                <Button variant="outline" size="sm" className="w-full h-6 text-xs" onClick={addCcRecipient} disabled={!newCcName.trim() || !newCcEmail.trim()}>
+  1674→  1674→                  <Plus className="w-3 h-3 mr-1" /> Add CC
+  1675→  1675→                </Button>
+  1676→  1676→              </div>
+  1677→  1677→            </div>
+  1678→  1678→
+  1679→  1679→            <Separator />
+  1680→  1680→
+  1681→  1681→            {/* Expiry Date */}
+  1682→  1682→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry Date</h3>
+  1683→  1683→            <Input
+  1684→  1684→              type="date"
+  1685→  1685→              value={expiryDate}
+  1686→  1686→              onChange={(e) => setExpiryDate(e.target.value)}
+  1687→  1687→              className="h-8 text-xs"
+  1688→  1688→              min={new Date().toISOString().split('T')[0]}
+  1689→  1689→            />
+  1690→  1690→            {expiryDate && (
+  1691→  1691→              <p className="text-xs text-muted-foreground">
+  1692→  1692→                Expires: {formatDateOnly(expiryDate)}
+  1693→  1693→              </p>
+  1694→  1694→            )}
+  1695→  1695→
+  1696→  1696→            {/* Load Template */}
+  1697→  1697→            {templates.length > 0 && (
+  1698→  1698→              <>
+  1699→  1699→                <Separator />
+
+[showing lines 1200-1699 of 2002; use offset=1700 with limit to continue reading]
