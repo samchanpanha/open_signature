@@ -5,7 +5,9 @@ import {
   FileText, Upload, Plus, Trash2, ArrowLeft, LogOut, PenLine,
   CalendarDays, Type, Send, Download, Copy, Check, Eye, Users,
   Clock, Shield, X, ChevronDown, ChevronRight, Loader2, FileSignature,
-  AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon
+  AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon,
+  Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
+  FileDown, XCircle, AlertTriangle, Save
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,13 +15,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTheme } from 'next-themes';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
@@ -45,6 +48,11 @@ interface TempSigner {
   color: string;
 }
 
+interface CcRecipient {
+  name: string;
+  email: string;
+}
+
 interface AuditEntry {
   id: string;
   action: string;
@@ -54,12 +62,28 @@ interface AuditEntry {
   userAgent: string | null;
 }
 
+interface Template {
+  id: string;
+  name: string;
+  fieldConfig: any[];
+  createdAt: string;
+}
+
+interface SavedSignature {
+  id: string;
+  name: string;
+  dataUrl: string;
+  createdAt: string;
+}
+
 const SIGNER_COLORS = ['#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#c026d3'];
 const FIELD_DEFAULTS = {
   signature: { width: 200, height: 60 },
   date: { width: 150, height: 40 },
   text: { width: 200, height: 40 },
 };
+
+const STATUS_TABS = ['All', 'Draft', 'Sent', 'Signing', 'Completed', 'Rejected', 'Expired'] as const;
 
 // ============ HELPER COMPONENTS ============
 function StatusBadge({ status }: { status: string }) {
@@ -68,12 +92,34 @@ function StatusBadge({ status }: { status: string }) {
     Sent: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
     Signing: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
     Completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    Rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+    Expired: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
   };
   return <Badge className={variants[status] || ''}>{status}</Badge>;
 }
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateOnly(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function ThemeToggle() {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8"
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+    >
+      {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </Button>
+  );
 }
 
 function SignatureCanvas({ onSave, width = 400, height = 150 }: { onSave: (dataUrl: string) => void; width?: number; height?: number }) {
@@ -229,53 +275,6 @@ function UploadSignature({ onSave }: { onSave: (dataUrl: string) => void }) {
   );
 }
 
-// ============ PDF RENDERER HOOK ============
-function usePdfRenderer(pdfUrl: string | null) {
-  const [pages, setPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!pdfUrl) { setPages([]); return; }
-    let cancelled = false;
-    setLoading(true);
-
-    (async () => {
-      try {
-        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
-        const rendered: typeof pages = [];
-
-        for (let i = 1; i <= pdf.numPages; i++) {
-          if (cancelled) break;
-          const page = await pdf.getPage(i);
-          const scale = 1.5;
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          rendered.push({
-            dataUrl: canvas.toDataURL('image/jpeg', 0.9),
-            width: viewport.width,
-            height: viewport.height,
-            pageNumber: i,
-          });
-        }
-        if (!cancelled) setPages(rendered);
-      } catch (err) {
-        console.error('PDF render error:', err);
-        toast.error('Failed to render PDF');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [pdfUrl]);
-
-  return { pages, loading };
-}
-
 // ============ MAIN APP ============
 export default function Home() {
   const store = useAppStore();
@@ -293,6 +292,12 @@ export default function Home() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatesOpen, setTemplatesOpen] = useState(true);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [loadTemplateDialog, setLoadTemplateDialog] = useState(false);
 
   // Editor
   const [editorDoc, setEditorDoc] = useState<DocumentDetail | null>(null);
@@ -306,8 +311,15 @@ export default function Home() {
   const [newSignerName, setNewSignerName] = useState('');
   const [newSignerEmail, setNewSignerEmail] = useState('');
   const [sending, setSending] = useState(false);
+  const [signSelfLoading, setSignSelfLoading] = useState(false);
   const [draggingField, setDraggingField] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [expiryDate, setExpiryDate] = useState('');
+  const [ccRecipients, setCcRecipients] = useState<CcRecipient[]>([]);
+  const [newCcName, setNewCcName] = useState('');
+  const [newCcEmail, setNewCcEmail] = useState('');
+  const [saveTemplateName, setSaveTemplateName] = useState('');
+  const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
 
   // Viewer
   const [viewerDoc, setViewerDoc] = useState<DocumentDetail | null>(null);
@@ -316,16 +328,20 @@ export default function Home() {
   const [viewerPdfLoading, setViewerPdfLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
   const [showAudit, setShowAudit] = useState(false);
-  const [signingLinks, setSigningLinks] = useState<{ email: string; token: string }[]>([]);
 
   // Signing
-  const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string } } | null>(null);
+  const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } } | null>(null);
   const [signingPages, setSigningPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
   const [signingPdfLoading, setSigningPdfLoading] = useState(false);
   const [signingFieldValues, setSigningFieldValues] = useState<Record<string, string>>({});
   const [signingLoading, setSigningLoading] = useState(false);
   const [signingComplete, setSigningComplete] = useState(false);
   const [activeSigningField, setActiveSigningField] = useState<string | null>(null);
+  const [rejectDialog, setRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
+  const [savedSigsLoading, setSavedSigsLoading] = useState(false);
 
   // ============ INIT ============
   useEffect(() => {
@@ -392,9 +408,36 @@ export default function Home() {
     }
   }, []);
 
+  const loadTemplates = useCallback(async () => {
+    setTemplateLoading(true);
+    try {
+      const list = await templatesApi.list();
+      setTemplates(list);
+    } catch {
+      // Templates may not be available, silently ignore
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (store.currentView === 'dashboard' && store.user) loadDocuments();
-  }, [store.currentView, store.user, loadDocuments]);
+    if (store.currentView === 'dashboard' && store.user) {
+      loadDocuments();
+      loadTemplates();
+    }
+  }, [store.currentView, store.user, loadDocuments, loadTemplates]);
+
+  const filteredDocuments = useMemo(() => {
+    let docs = documents;
+    if (statusFilter !== 'All') {
+      docs = docs.filter(d => d.status === statusFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      docs = docs.filter(d => d.title.toLowerCase().includes(q));
+    }
+    return docs;
+  }, [documents, statusFilter, searchQuery]);
 
   const handleUpload = async () => {
     if (!uploadFile) { toast.error('Please select a PDF'); return; }
@@ -424,6 +467,62 @@ export default function Home() {
       loadDocuments();
     } catch {
       toast.error('Failed to delete');
+    }
+  };
+
+  const handleDuplicateDoc = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      await documentsApi.duplicate(id);
+      toast.success('Document duplicated');
+      loadDocuments();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to duplicate');
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      await templatesApi.delete(id);
+      setTemplates(templates.filter(t => t.id !== id));
+      toast.success('Template deleted');
+    } catch {
+      toast.error('Failed to delete template');
+    }
+  };
+
+  const handleLoadTemplate = async (template: Template) => {
+    if (!store.editingDocumentId) return;
+    try {
+      // Parse template fields and create them on the current document
+      for (const f of template.fieldConfig) {
+        await fieldsApi.create(store.editingDocumentId, {
+          type: f.type,
+          pageNumber: f.pageNumber,
+          x: f.x,
+          y: f.y,
+          width: f.width,
+          height: f.height,
+        });
+      }
+      // Reload editor
+      const doc = await documentsApi.get(store.editingDocumentId);
+      setEditorDoc(doc);
+      setPlacedFields(doc.fields.map((f) => ({
+        id: f.id,
+        type: f.type as 'signature' | 'date' | 'text',
+        pageNumber: f.pageNumber,
+        x: f.x,
+        y: f.y,
+        width: f.width,
+        height: f.height,
+        signerId: f.signerId || undefined,
+        value: f.value,
+      })));
+      setLoadTemplateDialog(false);
+      toast.success(`Template "${template.name}" applied`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply template');
     }
   };
 
@@ -489,6 +588,13 @@ export default function Home() {
     setNewSignerEmail('');
   };
 
+  const addCcRecipient = () => {
+    if (!newCcName.trim() || !newCcEmail.trim()) return;
+    setCcRecipients([...ccRecipients, { name: newCcName.trim(), email: newCcEmail.trim() }]);
+    setNewCcName('');
+    setNewCcEmail('');
+  };
+
   const handlePageClick = async (e: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
     if (!activeTool || !store.editingDocumentId) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -541,7 +647,6 @@ export default function Home() {
     const signer = tempSigners[signerIndex];
     const signerId = `temp-${signerIndex}`;
     try {
-      // We update locally, the actual signer assignment happens on send
       setPlacedFields((prev) => prev.map((f) =>
         f.id === fieldId ? { ...f, signerId, signerName: signer.name, signerColor: signer.color } : f
       ));
@@ -551,16 +656,14 @@ export default function Home() {
     }
   };
 
-  const handleFieldDragStart = (fieldId: string, e: React.MouseEvent) => {
+  const handleFieldDragStart = (fieldId: string, _e: React.MouseEvent) => {
     const field = placedFields.find(f => f.id === fieldId);
     if (!field) return;
     setDraggingField(fieldId);
-    // We'll use a simplified approach: calculate offset from field center
   };
 
-  const handleFieldDrag = useCallback((e: MouseEvent) => {
+  const handleFieldDrag = useCallback((_e: MouseEvent) => {
     if (!draggingField) return;
-    // Simplified: we handle movement via mouse move on the page container
   }, [draggingField]);
 
   const handleFieldDragEnd = useCallback(() => {
@@ -586,19 +689,59 @@ export default function Home() {
 
     setSending(true);
     try {
-      // Build field assignments map: { fieldId, signerIndex }
       const fieldAssignments = assignedFields.map(f => ({
         fieldId: f.id,
         signerIndex: parseInt(f.signerId!.replace('temp-', ''), 10),
       }));
 
-      const result = await documentsApi.send(store.editingDocumentId, tempSigners.map(s => ({ email: s.email, name: s.name })), fieldAssignments);
+      const result = await documentsApi.send(
+        store.editingDocumentId,
+        tempSigners.map(s => ({ email: s.email, name: s.name })),
+        fieldAssignments,
+        ccRecipients.length > 0 ? ccRecipients : undefined,
+        expiryDate || undefined,
+      );
       toast.success('Document sent for signing!');
       store.setView('dashboard');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleSignSelf = async () => {
+    if (!store.editingDocumentId) return;
+    setSignSelfLoading(true);
+    try {
+      const result = await documentsApi.signSelf(store.editingDocumentId);
+      toast.success('Redirecting to sign...');
+      store.setSigningToken(result.token);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to sign yourself');
+    } finally {
+      setSignSelfLoading(false);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!saveTemplateName.trim()) { toast.error('Enter a template name'); return; }
+    try {
+      const fieldConfig = placedFields.map(f => ({
+        type: f.type,
+        pageNumber: f.pageNumber,
+        x: f.x,
+        y: f.y,
+        width: f.width,
+        height: f.height,
+      }));
+      await templatesApi.create(saveTemplateName.trim(), fieldConfig);
+      toast.success(`Template "${saveTemplateName.trim()}" saved!`);
+      setSaveTemplateDialog(false);
+      setSaveTemplateName('');
+      loadTemplates();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save template');
     }
   };
 
@@ -664,7 +807,34 @@ export default function Home() {
     }
   };
 
+  const handleDownloadCertificate = async () => {
+    if (!store.viewingDocumentId) return;
+    try {
+      const url = await documentsApi.certificate(store.viewingDocumentId);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${viewerDoc?.title || 'document'}-certificate.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Certificate download started');
+    } catch (err: any) {
+      toast.error(err.message || 'Certificate download failed');
+    }
+  };
+
   // ============ SIGNING (GUEST) ============
+  const loadSavedSignatures = useCallback(async () => {
+    setSavedSigsLoading(true);
+    try {
+      const sigs = await signaturesApi.list();
+      setSavedSignatures(sigs);
+    } catch {
+      // Silently ignore - may not be logged in
+    } finally {
+      setSavedSigsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!store.signingToken) return;
     setSigningPdfLoading(true);
@@ -679,12 +849,14 @@ export default function Home() {
         for (const f of info.signer.fields) {
           const val = f.type === 'date' ? new Date().toLocaleDateString() : (f.value || '');
           vals[f.id] = val;
-          // Persist initial values (especially dates) to server
           if (val) {
             signingApi.updateField(store.signingToken!, f.id, val).catch(() => {});
           }
         }
         setSigningFieldValues(vals);
+
+        // Load saved signatures
+        loadSavedSignatures();
 
         // Load PDF
         const res = await fetch(`/api/sign/${store.signingToken}/file`);
@@ -711,7 +883,7 @@ export default function Home() {
         setSigningLoading(false);
       }
     })();
-  }, [store.signingToken]);
+  }, [store.signingToken, loadSavedSignatures]);
 
   const handleSigningFieldUpdate = async (fieldId: string, value: string) => {
     if (!store.signingToken) return;
@@ -725,7 +897,6 @@ export default function Home() {
 
   const handleCompleteSigning = async () => {
     if (!store.signingToken || !signingInfo) return;
-    // Check all fields filled
     const unfilled = signingInfo.signer.fields.filter(f => !signingFieldValues[f.id]?.trim());
     if (unfilled.length > 0) {
       toast.error(`Please fill all ${unfilled.length} remaining field(s)`);
@@ -742,6 +913,34 @@ export default function Home() {
       setSigningLoading(false);
     }
   };
+
+  const handleReject = async () => {
+    if (!store.signingToken || !rejectReason.trim()) {
+      toast.error('Please provide a rejection reason');
+      return;
+    }
+    setRejecting(true);
+    try {
+      await signingApi.reject(store.signingToken, rejectReason.trim());
+      toast.success('Document rejected');
+      setRejectDialog(false);
+      setRejectReason('');
+      // Show a rejection confirmation
+      setSigningComplete(true); // reuse the completion state to show result
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reject');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  const isNearExpiry = useMemo(() => {
+    if (!signingInfo?.document.expiresAt) return false;
+    const expiry = new Date(signingInfo.document.expiresAt);
+    const now = new Date();
+    const diff = expiry.getTime() - now.getTime();
+    return diff > 0 && diff < 24 * 60 * 60 * 1000; // < 24h
+  }, [signingInfo]);
 
   // ============ RENDER ============
   if (!mounted) return null;
@@ -800,9 +999,26 @@ export default function Home() {
                 <p className="text-xs text-muted-foreground">Sign as: {signingInfo.signer.name} ({signingInfo.signer.email})</p>
               </div>
             </div>
-            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Signing</Badge>
+            <div className="flex items-center gap-2">
+              <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Signing</Badge>
+              <ThemeToggle />
+            </div>
           </div>
         </header>
+
+        {/* Expiry warning */}
+        {isNearExpiry && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800"
+          >
+            <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-2 text-sm text-red-700 dark:text-red-400">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>This document expires soon — {signingInfo.document.expiresAt ? formatDateOnly(signingInfo.document.expiresAt) : 'soon'}. Please sign promptly.</span>
+            </div>
+          </motion.div>
+        )}
 
         <main className="flex-1 max-w-4xl mx-auto w-full p-4 space-y-4 pb-32">
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-3">
@@ -827,7 +1043,6 @@ export default function Home() {
                     className="w-full h-auto"
                     draggable={false}
                   />
-                  {/* Field overlays */}
                   {pageFields.map(field => {
                     const scaleX = 100 / 612;
                     const scaleY = 100 / 792;
@@ -890,19 +1105,49 @@ export default function Home() {
 
                 {field.type === 'signature' && (
                   <Tabs defaultValue="draw">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="grid w-full grid-cols-4">
                       <TabsTrigger value="draw"><PenLine className="w-3 h-3 mr-1" /> Draw</TabsTrigger>
                       <TabsTrigger value="type"><Edit3 className="w-3 h-3 mr-1" /> Type</TabsTrigger>
                       <TabsTrigger value="upload"><ImageIcon className="w-3 h-3 mr-1" /> Upload</TabsTrigger>
+                      <TabsTrigger value="saved"><Star className="w-3 h-3 mr-1" /> Saved</TabsTrigger>
                     </TabsList>
                     <TabsContent value="draw" className="mt-3">
-                      <SignatureCanvas onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+                      <SignatureCanvas
+                        onSave={(dataUrl) => {
+                          handleSigningFieldUpdate(field.id, dataUrl);
+                          // Also offer to save
+                        }}
+                      />
                     </TabsContent>
                     <TabsContent value="type" className="mt-3">
                       <TypeSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
                     </TabsContent>
                     <TabsContent value="upload" className="mt-3">
                       <UploadSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+                    </TabsContent>
+                    <TabsContent value="saved" className="mt-3">
+                      {savedSigsLoading ? (
+                        <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+                      ) : savedSignatures.length === 0 ? (
+                        <div className="text-center py-6 text-sm text-muted-foreground">
+                          <Star className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                          <p>No saved signatures yet</p>
+                          <p className="text-xs mt-1">Draw or upload a signature and save it for reuse</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto">
+                          {savedSignatures.map(sig => (
+                            <button
+                              key={sig.id}
+                              className="border rounded-lg p-2 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 transition-colors text-left group"
+                              onClick={() => handleSigningFieldUpdate(field.id, sig.dataUrl)}
+                            >
+                              <img src={sig.dataUrl} alt={sig.name} className="h-12 w-full object-contain mb-1" />
+                              <p className="text-xs font-medium truncate">{sig.name}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </TabsContent>
                   </Tabs>
                 )}
@@ -934,22 +1179,61 @@ export default function Home() {
           );
         })()}
 
-        {/* Complete signing button */}
+        {/* Complete signing / Reject buttons */}
         {!activeSigningField && (
           <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40 p-4">
-            <div className="max-w-2xl mx-auto">
+            <div className="max-w-2xl mx-auto flex gap-3">
               <Button
                 onClick={handleCompleteSigning}
                 disabled={signingLoading}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-12 text-base"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white h-12 text-base"
               >
                 {signingLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Complete Signing</>}
+              </Button>
+              <Button
+                onClick={() => setRejectDialog(true)}
+                variant="outline"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800 h-12 px-4"
+              >
+                <Ban className="w-4 h-4 mr-2" /> Reject
               </Button>
             </div>
           </div>
         )}
 
-        <footer className="border-t py-3 text-center text-xs text-muted-foreground">
+        {/* Reject Dialog */}
+        <Dialog open={rejectDialog} onOpenChange={setRejectDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <XCircle className="w-5 h-5" /> Reject Document
+              </DialogTitle>
+              <DialogDescription>
+                This action cannot be undone. Please provide a reason for rejecting this document.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <textarea
+                className="w-full min-h-[100px] rounded-lg border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="Reason for rejection..."
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRejectDialog(false)}>Cancel</Button>
+              <Button
+                onClick={handleReject}
+                disabled={rejecting || !rejectReason.trim()}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {rejecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Ban className="w-4 h-4 mr-2" /> Reject Document</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <footer className="border-t py-3 text-center text-xs text-muted-foreground sticky bottom-0 bg-background">
           Secured by OpenSign-compliant cryptographic sealing
         </footer>
       </div>
@@ -969,6 +1253,9 @@ export default function Home() {
               </div>
               <h1 className="text-3xl font-bold tracking-tight">OpenSign</h1>
               <p className="text-muted-foreground mt-2">Secure document signing. Cryptographically sealed. ESIGN compliant.</p>
+              <div className="flex justify-center mt-3">
+                <ThemeToggle />
+              </div>
             </div>
 
             <Card className="shadow-lg">
@@ -1027,8 +1314,9 @@ export default function Home() {
               </div>
               <span className="font-bold text-lg">OpenSign</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
+              <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={store.logout}>
                 <LogOut className="w-4 h-4" />
               </Button>
@@ -1036,8 +1324,54 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-6">
+        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 space-y-6">
+          {/* Templates Section */}
+          {templates.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+              <button
+                className="flex items-center gap-2 text-sm font-semibold mb-3 w-full text-left"
+                onClick={() => setTemplatesOpen(!templatesOpen)}
+              >
+                <BookmarkPlus className="w-4 h-4 text-emerald-600" />
+                Templates ({templates.length})
+                <ChevronDown className={`w-4 h-4 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} />
+              </button>
+              <AnimatePresence>
+                {templatesOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex gap-3 pb-4 overflow-x-auto">
+                      {templates.map(t => (
+                        <div
+                          key={t.id}
+                          className="flex-shrink-0 border rounded-lg p-3 bg-card hover:shadow-sm transition-shadow min-w-[160px] max-w-[200px] relative group"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium truncate">{t.name}</span>
+                            <button
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                              onClick={() => handleDeleteTemplate(t.id)}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{t.fieldConfig.length} field{t.fieldConfig.length !== 1 ? 's' : ''}</p>
+                          <p className="text-xs text-muted-foreground">{formatDateOnly(t.createdAt)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          )}
+
+          {/* Search and Actions */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold">Documents</h1>
               <p className="text-sm text-muted-foreground">Manage and send documents for signing</p>
@@ -1047,22 +1381,56 @@ export default function Home() {
             </Button>
           </div>
 
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search documents by title..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Status Filter Tabs */}
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {STATUS_TABS.map(tab => (
+              <button
+                key={tab}
+                className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap transition-colors ${
+                  statusFilter === tab
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }`}
+                onClick={() => setStatusFilter(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
           {dashLoading ? (
             <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
-          ) : documents.length === 0 ? (
+          ) : filteredDocuments.length === 0 ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
               <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
                 <FileText className="w-8 h-8 text-muted-foreground" />
               </div>
-              <h3 className="text-lg font-semibold mb-1">No documents yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">Upload a PDF to get started with document signing</p>
-              <Button variant="outline" onClick={() => setUploadDialog(true)}>
-                <Upload className="w-4 h-4 mr-2" /> Upload PDF
-              </Button>
+              <h3 className="text-lg font-semibold mb-1">
+                {documents.length === 0 ? 'No documents yet' : 'No matching documents'}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {documents.length === 0 ? 'Upload a PDF to get started with document signing' : 'Try adjusting your search or filter'}
+              </p>
+              {documents.length === 0 && (
+                <Button variant="outline" onClick={() => setUploadDialog(true)}>
+                  <Upload className="w-4 h-4 mr-2" /> Upload PDF
+                </Button>
+              )}
             </motion.div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {documents.map((doc, i) => (
+              {filteredDocuments.map((doc, i) => (
                 <motion.div
                   key={doc.id}
                   initial={{ y: 10, opacity: 0 }}
@@ -1094,22 +1462,12 @@ export default function Home() {
                         </div>
                         <div className="flex items-center gap-1">
                           <StatusBadge status={doc.status} />
-                          {doc.status === 'Draft' && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                            </Button>
-                          )}
                         </div>
                       </div>
                     </CardHeader>
                     <CardContent className="pt-0">
                       {doc.signerCount > 0 && (
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Users className="w-3.5 h-3.5" />
                             {doc.signedCount}/{doc.signerCount} signed
@@ -1117,6 +1475,28 @@ export default function Home() {
                           <Progress value={(doc.signedCount / doc.signerCount) * 100} className="h-1.5 w-20" />
                         </div>
                       )}
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1">
+                        {doc.status === 'Draft' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => handleDuplicateDoc(e, doc.id)}
+                          title="Duplicate document"
+                        >
+                          <CopyPlus className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -1200,16 +1580,19 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {tempSigners.length > 0 && <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>}
-              {assignedCount > 0 && <span>· {assignedCount} field{assignedCount !== 1 ? 's' : ''} assigned</span>}
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+                {tempSigners.length > 0 && <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>}
+                {assignedCount > 0 && <span>· {assignedCount} field{assignedCount !== 1 ? 's' : ''} assigned</span>}
+              </div>
+              <ThemeToggle />
             </div>
           </div>
         </header>
 
         <div className="flex-1 flex overflow-hidden">
           {/* Left sidebar: Field tools */}
-          <div className="w-56 border-r bg-muted/30 p-4 space-y-4 hidden lg:block">
+          <div className="w-56 border-r bg-muted/30 p-4 space-y-4 hidden lg:flex flex-col overflow-y-auto">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Field Types</h3>
             <div className="space-y-2">
               {([
@@ -1266,11 +1649,67 @@ export default function Home() {
 
             <Separator />
 
-            {/* Mobile field tools */}
-            <div className="lg:hidden space-y-2">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tools</h3>
+            {/* CC Recipients */}
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CC Recipients</h3>
+            <div className="space-y-2">
+              {ccRecipients.map((cc, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs p-1.5 bg-muted rounded-md">
+                  <div className="w-3 h-3 rounded-full bg-muted-foreground/30 shrink-0" />
+                  <div className="min-w-0 flex-1 truncate">
+                    <span className="font-medium">{cc.name}</span>
+                    <span className="text-muted-foreground ml-1">({cc.email})</span>
+                  </div>
+                  <button
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setCcRecipients(ccRecipients.filter((_, j) => j !== i))}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              <div className="space-y-1.5">
+                <Input placeholder="CC Name" value={newCcName} onChange={(e) => setNewCcName(e.target.value)} className="h-7 text-xs" />
+                <Input placeholder="CC Email" type="email" value={newCcEmail} onChange={(e) => setNewCcEmail(e.target.value)} className="h-7 text-xs" onKeyDown={(e) => e.key === 'Enter' && addCcRecipient()} />
+                <Button variant="outline" size="sm" className="w-full h-6 text-xs" onClick={addCcRecipient} disabled={!newCcName.trim() || !newCcEmail.trim()}>
+                  <Plus className="w-3 h-3 mr-1" /> Add CC
+                </Button>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Expiry Date */}
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Expiry Date</h3>
+            <Input
+              type="date"
+              value={expiryDate}
+              onChange={(e) => setExpiryDate(e.target.value)}
+              className="h-8 text-xs"
+              min={new Date().toISOString().split('T')[0]}
+            />
+            {expiryDate && (
+              <p className="text-xs text-muted-foreground">
+                Expires: {formatDateOnly(expiryDate)}
+              </p>
+            )}
+
+            {/* Load Template */}
+            {templates.length > 0 && (
+              <>
+                <Separator />
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Templates</h3>
+                <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={() => setLoadTemplateDialog(true)}>
+                  <BookmarkPlus className="w-3 h-3 mr-1" /> Load Template
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Mobile toolbar */}
+          <div className="lg:hidden fixed bottom-16 left-0 right-0 bg-background border-t z-40 p-2">
+            <div className="flex gap-2 justify-center">
               {[
-                { type: 'signature' as const, icon: PenLine, label: 'Signature' },
+                { type: 'signature' as const, icon: PenLine, label: 'Sig' },
                 { type: 'date' as const, icon: CalendarDays, label: 'Date' },
                 { type: 'text' as const, icon: Type, label: 'Text' },
               ].map(tool => (
@@ -1278,7 +1717,7 @@ export default function Home() {
                   key={tool.type}
                   variant={activeTool === tool.type ? 'default' : 'outline'}
                   size="sm"
-                  className={`w-full justify-start gap-2 ${activeTool === tool.type ? 'bg-emerald-600' : ''}`}
+                  className={`gap-1 ${activeTool === tool.type ? 'bg-emerald-600' : ''}`}
                   onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
                 >
                   <tool.icon className="w-4 h-4" /> {tool.label}
@@ -1288,7 +1727,7 @@ export default function Home() {
           </div>
 
           {/* PDF Area */}
-          <div className="flex-1 overflow-auto p-4 space-y-6">
+          <div className="flex-1 overflow-auto p-4 space-y-6 pb-24 lg:pb-4">
             {pdfLoading ? (
               <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
             ) : (
@@ -1315,7 +1754,7 @@ export default function Home() {
                             field.type === 'signature' ? 'border-emerald-400 bg-emerald-50/70' :
                             field.type === 'date' ? 'border-amber-400 bg-amber-50/70' :
                             'border-neutral-400 bg-neutral-50/70'
-                          } ${field.signerColor ? `ring-2` : ''}`}
+                          } ${field.signerColor ? 'ring-2' : ''}`}
                           style={{
                             left: `${(field.x / 612) * 100}%`,
                             top: `${(field.y / 792) * 100}%`,
@@ -1323,6 +1762,7 @@ export default function Home() {
                             height: `${(field.height / 792) * 100}%`,
                             ringColor: field.signerColor,
                           }}
+                          onMouseDown={(e) => handleFieldDragStart(field.id, e)}
                         >
                           <div className="flex items-center gap-1 px-1">
                             {field.type === 'signature' && <PenLine className="w-3 h-3 text-emerald-600" />}
@@ -1371,21 +1811,110 @@ export default function Home() {
 
         {/* Bottom action bar */}
         {editorDoc.status === 'Draft' && (
-          <div className="border-t bg-background p-4 sticky bottom-0">
-            <div className="max-w-[1400px] mx-auto flex items-center justify-between">
+          <div className="border-t bg-background p-4 sticky bottom-0 z-30">
+            <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <span>{placedFields.length} field{placedFields.length !== 1 ? 's' : ''}</span>
                 <span>·</span>
                 <span>{assignedCount} assigned</span>
                 <span>·</span>
                 <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>
+                {ccRecipients.length > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>{ccRecipients.length} CC</span>
+                  </>
+                )}
               </div>
-              <Button onClick={handleSendForSigning} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
-                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> Send for Signing</>}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSaveTemplateDialog(true)}
+                  disabled={placedFields.length === 0}
+                >
+                  <BookmarkPlus className="w-4 h-4 mr-1" /> Save Template
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSignSelf}
+                  disabled={signSelfLoading || placedFields.length === 0}
+                >
+                  {signSelfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><PenLine className="w-4 h-4 mr-1" /> Sign Yourself</>}
+                </Button>
+                <Button onClick={handleSendForSigning} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> Send for Signing</>}
+                </Button>
+              </div>
             </div>
           </div>
         )}
+
+        {/* Save Template Dialog */}
+        <Dialog open={saveTemplateDialog} onOpenChange={setSaveTemplateDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <BookmarkPlus className="w-5 h-5 text-emerald-600" /> Save as Template
+              </DialogTitle>
+              <DialogDescription>
+                Save the current field layout as a reusable template. Field positions and types will be preserved.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Template Name</label>
+                <Input
+                  placeholder="e.g., NDA Template"
+                  value={saveTemplateName}
+                  onChange={(e) => setSaveTemplateName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveTemplate()}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {placedFields.length} field{placedFields.length !== 1 ? 's' : ''} will be saved
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSaveTemplateDialog(false)}>Cancel</Button>
+              <Button onClick={handleSaveTemplate} disabled={!saveTemplateName.trim()} className="bg-emerald-600 hover:bg-emerald-700">
+                <Save className="w-4 h-4 mr-2" /> Save Template
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Load Template Dialog */}
+        <Dialog open={loadTemplateDialog} onOpenChange={setLoadTemplateDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Load Template</DialogTitle>
+              <DialogDescription>
+                Select a template to auto-place fields on this document.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {templates.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No templates available</p>
+              ) : (
+                templates.map(t => (
+                  <button
+                    key={t.id}
+                    className="w-full text-left p-3 border rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-between"
+                    onClick={() => handleLoadTemplate(t)}
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{t.name}</p>
+                      <p className="text-xs text-muted-foreground">{t.fieldConfig.length} fields · {formatDateOnly(t.createdAt)}</p>
+                    </div>
+                    <BookmarkPlus className="w-4 h-4 text-emerald-600" />
+                  </button>
+                ))
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <footer className="border-t py-3 text-center text-xs text-muted-foreground">
           OpenSign-compliant PDF Signing Platform
@@ -1424,15 +1953,58 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2">
               {viewerDoc.status === 'Completed' && (
-                <Button size="sm" onClick={handleDownload} className="bg-emerald-600 hover:bg-emerald-700">
-                  <Download className="w-4 h-4 mr-1" /> Download
-                </Button>
+                <>
+                  <Button size="sm" variant="outline" onClick={handleDownloadCertificate} className="hidden sm:flex">
+                    <Award className="w-4 h-4 mr-1" /> Certificate
+                  </Button>
+                  <Button size="sm" onClick={handleDownload} className="bg-emerald-600 hover:bg-emerald-700">
+                    <Download className="w-4 h-4 mr-1" /> Download
+                  </Button>
+                </>
               )}
+              <ThemeToggle />
             </div>
           </div>
         </header>
 
         <main className="flex-1 max-w-5xl mx-auto w-full p-4 sm:p-6 space-y-6">
+          {/* Rejection Info */}
+          {viewerDoc.status === 'Rejected' && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4"
+            >
+              <div className="flex items-start gap-3">
+                <XCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-red-800 dark:text-red-400">Document Rejected</h3>
+                  {viewerDoc.rejectedBy && (
+                    <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                      Rejected by: {viewerDoc.rejectedBy}
+                    </p>
+                  )}
+                  {viewerDoc.rejectionReason && (
+                    <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                      Reason: {viewerDoc.rejectionReason}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Expiry Info */}
+          {viewerDoc.expiresAt && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="w-4 h-4" />
+              <span>Expires: {formatDateOnly(viewerDoc.expiresAt)}</span>
+              {new Date(viewerDoc.expiresAt) < new Date() && (
+                <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">Expired</Badge>
+              )}
+            </div>
+          )}
+
           {/* Signers Status */}
           <Card>
             <CardHeader className="pb-3">
@@ -1456,7 +2028,18 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {!signer.signedAt && signer.token && (
+                      {/* Rejection status for signer */}
+                      {signer.rejectedAt && (
+                        <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                          <XCircle className="w-3 h-3 mr-1" /> Rejected
+                        </Badge>
+                      )}
+                      {signer.rejectionReason && (
+                        <span className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate" title={signer.rejectionReason}>
+                          {signer.rejectionReason}
+                        </span>
+                      )}
+                      {!signer.rejectedAt && !signer.signedAt && signer.token && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1471,17 +2054,39 @@ export default function Home() {
                           <Copy className="w-3.5 h-3.5" />
                         </Button>
                       )}
-                      {signer.signedAt ? (
+                      {!signer.rejectedAt && signer.signedAt ? (
                         <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
                           <Check className="w-3 h-3 mr-1" /> Signed
                         </Badge>
-                      ) : (
+                      ) : !signer.rejectedAt ? (
                         <Badge variant="secondary">Pending</Badge>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* CC Recipients */}
+              {viewerDoc.ccRecipients && viewerDoc.ccRecipients.length > 0 && (
+                <>
+                  <Separator className="my-3" />
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">CC Recipients</h4>
+                  <div className="space-y-2">
+                    {viewerDoc.ccRecipients.map((cc, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2 rounded-lg">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground">
+                          {cc.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{cc.name}</p>
+                          <p className="text-xs text-muted-foreground">{cc.email}</p>
+                        </div>
+                        <Badge variant="secondary" className="ml-auto text-xs">CC</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -1567,7 +2172,7 @@ export default function Home() {
           </Card>
         </main>
 
-        <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto">
+        <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto sticky bottom-0 bg-background">
           OpenSign-compliant PDF Signing Platform
         </footer>
       </div>

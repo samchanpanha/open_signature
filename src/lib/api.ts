@@ -42,6 +42,10 @@ export interface DocumentListItem {
   createdAt: string;
   signerCount: number;
   signedCount: number;
+  expiresAt?: string | null;
+  ccRecipients?: { name: string; email: string }[];
+  rejectionReason?: string | null;
+  rejectedBy?: string | null;
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -55,6 +59,8 @@ export interface DocumentDetail extends DocumentListItem {
     order: number;
     signedAt: string | null;
     token?: string;
+    rejectedAt?: string | null;
+    rejectionReason?: string | null;
   }[];
   fields: {
     id: string;
@@ -101,10 +107,10 @@ export const documentsApi = {
       return data as DocumentDetail;
     }),
   delete: (id: string) => request(`/api/documents/${id}`, { method: 'DELETE' }),
-  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[]) =>
+  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string) =>
     request<DocumentDetail>(`/api/documents/${id}/send`, {
       method: 'POST',
-      body: JSON.stringify({ signers, fieldAssignments }),
+      body: JSON.stringify({ signers, fieldAssignments, ccRecipients, expiresAt }),
     }),
   download: (id: string) =>
     fetch(`/api/documents/${id}/download`, {
@@ -118,6 +124,18 @@ export const documentsApi = {
     request<{ id: string; action: string; createdAt: string; details: string | null; ipAddress: string | null; userAgent: string | null }[]>(
       `/api/documents/${id}/audit`
     ),
+  duplicate: (id: string) =>
+    request<DocumentDetail>(`/api/documents/${id}/duplicate`, { method: 'POST' }),
+  signSelf: (id: string) =>
+    request<{ token: string }>(`/api/documents/${id}/sign-self`, { method: 'POST' }),
+  certificate: (id: string) =>
+    fetch(`/api/documents/${id}/certificate`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    }).then(async (res) => {
+      if (!res.ok) throw new Error('Certificate download failed');
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    }),
 };
 
 // Fields
@@ -138,7 +156,7 @@ export const fieldsApi = {
 // Signing (guest)
 export const signingApi = {
   getInfo: (token: string) =>
-    request<{ signer: SignerInfo; document: { id: string; title: string; status: string } }>(`/api/sign/${token}`),
+    request<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } }>(`/api/sign/${token}`),
   updateField: (token: string, fieldId: string, value: string) =>
     request(`/api/sign/${token}/field`, {
       method: 'PUT',
@@ -146,12 +164,40 @@ export const signingApi = {
     }),
   complete: (token: string) =>
     request<{ success: boolean }>(`/api/sign/${token}/complete`, { method: 'POST' }),
-  downloadSigned: (documentId: string) =>
+  downloadSigned: (token: string) =>
     fetch(`/api/sign/${token}/download`).then(async (res) => {
       if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
       return URL.createObjectURL(blob);
     }),
+  reject: (token: string, reason: string) =>
+    request(`/api/sign/${token}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+};
+
+// Templates
+export const templatesApi = {
+  list: () => request<{ id: string; name: string; fieldConfig: any[]; createdAt: string }[]>('/api/templates'),
+  create: (name: string, fieldConfig: any[]) =>
+    request('/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({ name, fieldConfig }),
+    }),
+  delete: (id: string) => request(`/api/templates/${id}`, { method: 'DELETE' }),
+};
+
+// Saved Signatures
+export const signaturesApi = {
+  list: () => request<{ id: string; name: string; dataUrl: string; createdAt: string }[]>('/api/signatures'),
+  save: (name: string, dataUrl: string) =>
+    request('/api/signatures', {
+      method: 'POST',
+      body: JSON.stringify({ name, dataUrl }),
+    }),
+  delete: (id: string) =>
+    request(`/api/signatures?id=${id}`, { method: 'DELETE' }),
 };
 
 // PDF pages (rendered as images)

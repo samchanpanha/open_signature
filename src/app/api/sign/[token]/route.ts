@@ -14,15 +14,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       return NextResponse.json({ error: 'Invalid signing link' }, { status: 404 });
     }
 
+    // Check expiry
+    if (signer.document.expiresAt && new Date() > signer.document.expiresAt) {
+      await db.document.update({ where: { id: signer.documentId }, data: { status: 'Expired' } });
+      return NextResponse.json({ error: 'This document has expired', code: 'EXPIRED' }, { status: 400 });
+    }
+
     if (signer.document.status === 'Completed') {
       return NextResponse.json({ error: 'Document already completed' }, { status: 400 });
+    }
+    if (signer.document.status === 'Rejected') {
+      return NextResponse.json({ error: 'Document has been rejected', code: 'REJECTED' }, { status: 400 });
+    }
+    if (signer.document.status === 'Expired') {
+      return NextResponse.json({ error: 'This document has expired', code: 'EXPIRED' }, { status: 400 });
     }
 
     if (signer.signedAt) {
       return NextResponse.json({ error: 'You have already signed this document' }, { status: 400 });
     }
+    if (signer.rejectedAt) {
+      return NextResponse.json({ error: 'You have already rejected this document' }, { status: 400 });
+    }
 
-    // Check if it's this signer's turn
+    // Check signing order
     const allSigners = await db.signer.findMany({
       where: { documentId: signer.documentId },
       orderBy: { order: 'asc' },
@@ -35,13 +50,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       }
     }
 
-    // Update document status to Signing
     await db.document.update({
       where: { id: signer.documentId },
       data: { status: 'Signing' },
     });
 
-    // Get fields for this signer (separate query)
     const signerFields = await db.documentField.findMany({
       where: { signerId: signer.id },
       orderBy: { pageNumber: 'asc' },
@@ -55,20 +68,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         order: signer.order,
         signedAt: signer.signedAt,
         fields: signerFields.map((f) => ({
-          id: f.id,
-          type: f.type,
-          pageNumber: f.pageNumber,
-          x: f.x,
-          y: f.y,
-          width: f.width,
-          height: f.height,
-          value: f.value,
+          id: f.id, type: f.type, pageNumber: f.pageNumber,
+          x: f.x, y: f.y, width: f.width, height: f.height, value: f.value,
         })),
       },
       document: {
         id: signer.document.id,
         title: signer.document.title,
         status: signer.document.status,
+        expiresAt: signer.document.expiresAt,
       },
     });
   } catch (error) {

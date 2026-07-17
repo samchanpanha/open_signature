@@ -1,0 +1,1578 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+     4→import {
+     5→  FileText, Upload, Plus, Trash2, ArrowLeft, LogOut, PenLine,
+     6→  CalendarDays, Type, Send, Download, Copy, Check, Eye, Users,
+     7→  Clock, Shield, X, ChevronDown, ChevronRight, Loader2, FileSignature,
+     8→  AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon
+     9→} from 'lucide-react';
+    10→import { Button } from '@/components/ui/button';
+    11→import { Input } from '@/components/ui/input';
+    12→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    13→import { Badge } from '@/components/ui/badge';
+    14→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+    15→import { Separator } from '@/components/ui/separator';
+    16→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+    17→import { ScrollArea } from '@/components/ui/scroll-area';
+    18→import { Progress } from '@/components/ui/progress';
+    19→import { useAppStore, type AppView, type User } from '@/lib/store';
+    20→import { authApi, documentsApi, fieldsApi, signingApi, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
+    21→import { toast } from 'sonner';
+    22→import { motion, AnimatePresence } from 'framer-motion';
+    23→import * as pdfjsLib from 'pdfjs-dist';
+    24→
+    25→pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+    26→
+    27→// ============ TYPES ============
+    28→interface PlacedField {
+    29→  id: string;
+    30→  type: 'signature' | 'date' | 'text';
+    31→  pageNumber: number;
+    32→  x: number;
+    33→  y: number;
+    34→  width: number;
+    35→  height: number;
+    36→  signerId?: string;
+    37→  signerName?: string;
+    38→  signerColor?: string;
+    39→  value?: string | null;
+    40→}
+    41→
+    42→interface TempSigner {
+    43→  name: string;
+    44→  email: string;
+    45→  color: string;
+    46→}
+    47→
+    48→interface AuditEntry {
+    49→  id: string;
+    50→  action: string;
+    51→  createdAt: string;
+    52→  details: string | null;
+    53→  ipAddress: string | null;
+    54→  userAgent: string | null;
+    55→}
+    56→
+    57→const SIGNER_COLORS = ['#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#c026d3'];
+    58→const FIELD_DEFAULTS = {
+    59→  signature: { width: 200, height: 60 },
+    60→  date: { width: 150, height: 40 },
+    61→  text: { width: 200, height: 40 },
+    62→};
+    63→
+    64→// ============ HELPER COMPONENTS ============
+    65→function StatusBadge({ status }: { status: string }) {
+    66→  const variants: Record<string, string> = {
+    67→    Draft: 'bg-secondary text-secondary-foreground',
+    68→    Sent: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+    69→    Signing: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+    70→    Completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    71→  };
+    72→  return <Badge className={variants[status] || ''}>{status}</Badge>;
+    73→}
+    74→
+    75→function formatDate(dateStr: string) {
+    76→  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    77→}
+    78→
+    79→function SignatureCanvas({ onSave, width = 400, height = 150 }: { onSave: (dataUrl: string) => void; width?: number; height?: number }) {
+    80→  const canvasRef = useRef<HTMLCanvasElement>(null);
+    81→  const isDrawing = useRef(false);
+    82→  const lastPos = useRef({ x: 0, y: 0 });
+    83→
+    84→  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    85→    const canvas = canvasRef.current!;
+    86→    const rect = canvas.getBoundingClientRect();
+    87→    const scaleX = canvas.width / rect.width;
+    88→    const scaleY = canvas.height / rect.height;
+    89→    if ('touches' in e) {
+    90→      return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
+    91→    }
+    92→    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    93→  }, []);
+    94→
+    95→  const startDraw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    96→    isDrawing.current = true;
+    97→    const pos = getPos(e);
+    98→    lastPos.current = pos;
+    99→    const ctx = canvasRef.current!.getContext('2d')!;
+   100→    ctx.beginPath();
+   101→    ctx.moveTo(pos.x, pos.y);
+   102→  }, [getPos]);
+   103→
+   104→  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+   105→    if (!isDrawing.current) return;
+   106→    const pos = getPos(e);
+   107→    const ctx = canvasRef.current!.getContext('2d')!;
+   108→    ctx.strokeStyle = '#1a1a2e';
+   109→    ctx.lineWidth = 2.5;
+   110→    ctx.lineCap = 'round';
+   111→    ctx.lineJoin = 'round';
+   112→    ctx.beginPath();
+   113→    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+   114→    ctx.lineTo(pos.x, pos.y);
+   115→    ctx.stroke();
+   116→    lastPos.current = pos;
+   117→  }, [getPos]);
+   118→
+   119→  const endDraw = useCallback(() => { isDrawing.current = false; }, []);
+   120→
+   121→  const clear = () => {
+   122→    const ctx = canvasRef.current!.getContext('2d')!;
+   123→    ctx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+   124→  };
+   125→
+   126→  const save = () => {
+   127→    const dataUrl = canvasRef.current!.toDataURL('image/png');
+   128→    onSave(dataUrl);
+   129→  };
+   130→
+   131→  return (
+   132→    <div className="space-y-3">
+   133→      <canvas
+   134→        ref={canvasRef}
+   135→        width={width}
+   136→        height={height}
+   137→        className="border-2 border-dashed border-muted-foreground/30 rounded-lg cursor-crosshair bg-white w-full"
+   138→        style={{ touchAction: 'none' }}
+   139→        onMouseDown={startDraw}
+   140→        onMouseMove={draw}
+   141→        onMouseUp={endDraw}
+   142→        onMouseLeave={endDraw}
+   143→        onTouchStart={startDraw}
+   144→        onTouchMove={draw}
+   145→        onTouchEnd={endDraw}
+   146→      />
+   147→      <div className="flex gap-2">
+   148→        <Button variant="outline" size="sm" onClick={clear} className="flex-1">
+   149→          <X className="w-4 h-4 mr-1" /> Clear
+   150→        </Button>
+   151→        <Button size="sm" onClick={save} className="flex-1 bg-emerald-600 hover:bg-emerald-700">
+   152→          <Check className="w-4 h-4 mr-1" /> Apply
+   153→        </Button>
+   154→      </div>
+   155→    </div>
+   156→  );
+   157→}
+   158→
+   159→function TypeSignature({ onSave }: { onSave: (dataUrl: string) => void }) {
+   160→  const [text, setText] = useState('');
+   161→  const canvasRef = useRef<HTMLCanvasElement>(null);
+   162→
+   163→  useEffect(() => {
+   164→    if (!canvasRef.current) return;
+   165→    const ctx = canvasRef.current.getContext('2d')!;
+   166→    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+   167→    if (!text) return;
+   168→    ctx.font = 'italic 42px "Segoe Script", "Apple Chancery", cursive, serif';
+   169→    ctx.fillStyle = '#1a1a2e';
+   170→    ctx.textBaseline = 'middle';
+   171→    ctx.fillText(text, 10, canvasRef.current.height / 2);
+   172→  }, [text]);
+   173→
+   174→  const save = () => {
+   175→    if (!text.trim()) return;
+   176→    onSave(canvasRef.current!.toDataURL('image/png'));
+   177→  };
+   178→
+   179→  return (
+   180→    <div className="space-y-3">
+   181→      <Input
+   182→        placeholder="Type your name"
+   183→        value={text}
+   184→        onChange={(e) => setText(e.target.value)}
+   185→      />
+   186→      <canvas ref={canvasRef} width={400} height={80} className="border rounded-lg bg-white w-full" />
+   187→      <Button size="sm" onClick={save} disabled={!text.trim()} className="w-full bg-emerald-600 hover:bg-emerald-700">
+   188→        <Check className="w-4 h-4 mr-1" /> Apply
+   189→      </Button>
+   190→    </div>
+   191→  );
+   192→}
+   193→
+   194→function UploadSignature({ onSave }: { onSave: (dataUrl: string) => void }) {
+   195→  const [preview, setPreview] = useState<string | null>(null);
+   196→
+   197→  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+   198→    const file = e.target.files?.[0];
+   199→    if (!file) return;
+   200→    const reader = new FileReader();
+   201→    reader.onload = () => {
+   202→      const result = reader.result as string;
+   203→      setPreview(result);
+   204→    };
+   205→    reader.readAsDataURL(file);
+   206→  };
+   207→
+   208→  const save = () => {
+   209→    if (preview) onSave(preview);
+   210→  };
+   211→
+   212→  return (
+   213→    <div className="space-y-3">
+   214→      <div className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-6 text-center">
+   215→        {preview ? (
+   216→          <img src={preview} alt="Signature preview" className="max-h-24 mx-auto" />
+   217→        ) : (
+   218→          <div>
+   219→            <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+   220→            <p className="text-sm text-muted-foreground">Upload PNG or JPG</p>
+   221→          </div>
+   222→        )}
+   223→        <input type="file" accept="image/png,image/jpeg" onChange={handleFile} className="mt-2 text-sm" />
+   224→      </div>
+   225→      <Button size="sm" onClick={save} disabled={!preview} className="w-full bg-emerald-600 hover:bg-emerald-700">
+   226→        <Check className="w-4 h-4 mr-1" /> Apply
+   227→      </Button>
+   228→    </div>
+   229→  );
+   230→}
+   231→
+   232→// ============ PDF RENDERER HOOK ============
+   233→function usePdfRenderer(pdfUrl: string | null) {
+   234→  const [pages, setPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
+   235→  const [loading, setLoading] = useState(false);
+   236→
+   237→  useEffect(() => {
+   238→    if (!pdfUrl) { setPages([]); return; }
+   239→    let cancelled = false;
+   240→    setLoading(true);
+   241→
+   242→    (async () => {
+   243→      try {
+   244→        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+   245→        const rendered: typeof pages = [];
+   246→
+   247→        for (let i = 1; i <= pdf.numPages; i++) {
+   248→          if (cancelled) break;
+   249→          const page = await pdf.getPage(i);
+   250→          const scale = 1.5;
+   251→          const viewport = page.getViewport({ scale });
+   252→          const canvas = document.createElement('canvas');
+   253→          canvas.width = viewport.width;
+   254→          canvas.height = viewport.height;
+   255→          const ctx = canvas.getContext('2d')!;
+   256→          await page.render({ canvasContext: ctx, viewport }).promise;
+   257→          rendered.push({
+   258→            dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+   259→            width: viewport.width,
+   260→            height: viewport.height,
+   261→            pageNumber: i,
+   262→          });
+   263→        }
+   264→        if (!cancelled) setPages(rendered);
+   265→      } catch (err) {
+   266→        console.error('PDF render error:', err);
+   267→        toast.error('Failed to render PDF');
+   268→      } finally {
+   269→        if (!cancelled) setLoading(false);
+   270→      }
+   271→    })();
+   272→
+   273→    return () => { cancelled = true; };
+   274→  }, [pdfUrl]);
+   275→
+   276→  return { pages, loading };
+   277→}
+   278→
+   279→// ============ MAIN APP ============
+   280→export default function Home() {
+   281→  const store = useAppStore();
+   282→  const [mounted, setMounted] = useState(false);
+   283→  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+   284→  const [authLoading, setAuthLoading] = useState(false);
+   285→  const [authEmail, setAuthEmail] = useState('');
+   286→  const [authName, setAuthName] = useState('');
+   287→  const [authPassword, setAuthPassword] = useState('');
+   288→
+   289→  // Dashboard
+   290→  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
+   291→  const [dashLoading, setDashLoading] = useState(false);
+   292→  const [uploadDialog, setUploadDialog] = useState(false);
+   293→  const [uploadFile, setUploadFile] = useState<File | null>(null);
+   294→  const [uploadTitle, setUploadTitle] = useState('');
+   295→  const [uploading, setUploading] = useState(false);
+   296→
+   297→  // Editor
+   298→  const [editorDoc, setEditorDoc] = useState<DocumentDetail | null>(null);
+   299→  const [editorLoading, setEditorLoading] = useState(false);
+   300→  const [pdfPages, setPdfPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
+   301→  const [pdfLoading, setPdfLoading] = useState(false);
+   302→  const [placedFields, setPlacedFields] = useState<PlacedField[]>([]);
+   303→  const [activeTool, setActiveTool] = useState<'signature' | 'date' | 'text' | null>(null);
+   304→  const [activeSignerId, setActiveSignerId] = useState<string | null>(null);
+   305→  const [tempSigners, setTempSigners] = useState<TempSigner[]>([]);
+   306→  const [newSignerName, setNewSignerName] = useState('');
+   307→  const [newSignerEmail, setNewSignerEmail] = useState('');
+   308→  const [sending, setSending] = useState(false);
+   309→  const [draggingField, setDraggingField] = useState<string | null>(null);
+   310→  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+   311→
+   312→  // Viewer
+   313→  const [viewerDoc, setViewerDoc] = useState<DocumentDetail | null>(null);
+   314→  const [viewerLoading, setViewerLoading] = useState(false);
+   315→  const [viewerPages, setViewerPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
+   316→  const [viewerPdfLoading, setViewerPdfLoading] = useState(false);
+   317→  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
+   318→  const [showAudit, setShowAudit] = useState(false);
+   319→  const [signingLinks, setSigningLinks] = useState<{ email: string; token: string }[]>([]);
+   320→
+   321→  // Signing
+   322→  const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string } } | null>(null);
+   323→  const [signingPages, setSigningPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
+   324→  const [signingPdfLoading, setSigningPdfLoading] = useState(false);
+   325→  const [signingFieldValues, setSigningFieldValues] = useState<Record<string, string>>({});
+   326→  const [signingLoading, setSigningLoading] = useState(false);
+   327→  const [signingComplete, setSigningComplete] = useState(false);
+   328→  const [activeSigningField, setActiveSigningField] = useState<string | null>(null);
+   329→
+   330→  // ============ INIT ============
+   331→  useEffect(() => {
+   332→    setMounted(true);
+   333→    const token = localStorage.getItem('token');
+   334→    const params = new URLSearchParams(window.location.search);
+   335→    const signToken = params.get('sign');
+   336→
+   337→    if (signToken) {
+   338→      store.setSigningToken(signToken);
+   339→      return;
+   340→    }
+   341→
+   342→    if (token) {
+   343→      authApi.me().then((user) => {
+   344→        store.setAuth(user, token);
+   345→        store.setView('dashboard');
+   346→      }).catch(() => {
+   347→        localStorage.removeItem('token');
+   348→      });
+   349→    }
+   350→  }, []);
+   351→
+   352→  // ============ AUTH HANDLERS ============
+   353→  const handleAuth = async () => {
+   354→    if (authMode === 'register' && (!authEmail || !authName || !authPassword)) {
+   355→      toast.error('Please fill all fields');
+   356→      return;
+   357→    }
+   358→    if (authMode === 'login' && (!authEmail || !authPassword)) {
+   359→      toast.error('Please fill all fields');
+   360→      return;
+   361→    }
+   362→    if (authPassword.length < 6) {
+   363→      toast.error('Password must be at least 6 characters');
+   364→      return;
+   365→    }
+   366→
+   367→    setAuthLoading(true);
+   368→    try {
+   369→      const result = authMode === 'register'
+   370→        ? await authApi.register(authEmail, authName, authPassword)
+   371→        : await authApi.login(authEmail, authPassword);
+   372→      store.setAuth(result.user, result.token);
+   373→      store.setView('dashboard');
+   374→      toast.success(`Welcome${result.user.name ? ', ' + result.user.name : ''}!`);
+   375→    } catch (err: any) {
+   376→      toast.error(err.message || 'Authentication failed');
+   377→    } finally {
+   378→      setAuthLoading(false);
+   379→    }
+   380→  };
+   381→
+   382→  // ============ DASHBOARD ============
+   383→  const loadDocuments = useCallback(async () => {
+   384→    setDashLoading(true);
+   385→    try {
+   386→      const docs = await documentsApi.list();
+   387→      setDocuments(docs);
+   388→    } catch {
+   389→      toast.error('Failed to load documents');
+   390→    } finally {
+   391→      setDashLoading(false);
+   392→    }
+   393→  }, []);
+   394→
+   395→  useEffect(() => {
+   396→    if (store.currentView === 'dashboard' && store.user) loadDocuments();
+   397→  }, [store.currentView, store.user, loadDocuments]);
+   398→
+   399→  const handleUpload = async () => {
+   400→    if (!uploadFile) { toast.error('Please select a PDF'); return; }
+   401→    setUploading(true);
+   402→    try {
+   403→      const formData = new FormData();
+   404→      formData.append('file', uploadFile);
+   405→      formData.append('title', uploadTitle || uploadFile.name.replace('.pdf', ''));
+   406→      const doc = await documentsApi.create(formData);
+   407→      toast.success('Document uploaded!');
+   408→      setUploadDialog(false);
+   409→      setUploadFile(null);
+   410→      setUploadTitle('');
+   411→      store.setEditingDocument(doc.id);
+   412→      store.setView('editor');
+   413→    } catch (err: any) {
+   414→      toast.error(err.message || 'Upload failed');
+   415→    } finally {
+   416→      setUploading(false);
+   417→    }
+   418→  };
+   419→
+   420→  const handleDeleteDoc = async (id: string) => {
+   421→    try {
+   422→      await documentsApi.delete(id);
+   423→      toast.success('Document deleted');
+   424→      loadDocuments();
+   425→    } catch {
+   426→      toast.error('Failed to delete');
+   427→    }
+   428→  };
+   429→
+   430→  // ============ EDITOR ============
+   431→  const loadEditor = useCallback(async () => {
+   432→    if (!store.editingDocumentId) return;
+   433→    setEditorLoading(true);
+   434→    setPdfLoading(true);
+   435→    try {
+   436→      const doc = await documentsApi.get(store.editingDocumentId);
+   437→      setEditorDoc(doc);
+   438→      setPlacedFields(doc.fields.map((f) => ({
+   439→        id: f.id,
+   440→        type: f.type as 'signature' | 'date' | 'text',
+   441→        pageNumber: f.pageNumber,
+   442→        x: f.x,
+   443→        y: f.y,
+   444→        width: f.width,
+   445→        height: f.height,
+   446→        signerId: f.signerId || undefined,
+   447→        value: f.value,
+   448→      })));
+   449→
+   450→      // Render PDF pages
+   451→      const token = localStorage.getItem('token');
+   452→      const res = await fetch(`/api/documents/${store.editingDocumentId}/file`, {
+   453→        headers: { Authorization: `Bearer ${token}` },
+   454→      });
+   455→      const blob = await res.blob();
+   456→      const pdfUrl = URL.createObjectURL(blob);
+   457→      const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+   458→      const rendered: typeof pdfPages = [];
+   459→      for (let i = 1; i <= pdf.numPages; i++) {
+   460→        const page = await pdf.getPage(i);
+   461→        const scale = 1.5;
+   462→        const viewport = page.getViewport({ scale });
+   463→        const canvas = document.createElement('canvas');
+   464→        canvas.width = viewport.width;
+   465→        canvas.height = viewport.height;
+   466→        const ctx = canvas.getContext('2d')!;
+   467→        await page.render({ canvasContext: ctx, viewport }).promise;
+   468→        rendered.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.9), width: viewport.width, height: viewport.height, pageNumber: i });
+   469→      }
+   470→      setPdfPages(rendered);
+   471→    } catch (err) {
+   472→      toast.error('Failed to load document');
+   473→      console.error(err);
+   474→    } finally {
+   475→      setEditorLoading(false);
+   476→      setPdfLoading(false);
+   477→    }
+   478→  }, [store.editingDocumentId]);
+   479→
+   480→  useEffect(() => {
+   481→    if (store.currentView === 'editor') loadEditor();
+   482→  }, [store.currentView, loadEditor]);
+   483→
+   484→  const addSigner = () => {
+   485→    if (!newSignerName.trim() || !newSignerEmail.trim()) return;
+   486→    const color = SIGNER_COLORS[tempSigners.length % SIGNER_COLORS.length];
+   487→    setTempSigners([...tempSigners, { name: newSignerName.trim(), email: newSignerEmail.trim(), color }]);
+   488→    setNewSignerName('');
+   489→    setNewSignerEmail('');
+   490→  };
+   491→
+   492→  const handlePageClick = async (e: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
+   493→    if (!activeTool || !store.editingDocumentId) return;
+   494→    const rect = e.currentTarget.getBoundingClientRect();
+   495→    const scaleX = 612 / rect.width;
+   496→    const scaleY = 792 / rect.height;
+   497→    const x = (e.clientX - rect.left) * scaleX;
+   498→    const y = (e.clientY - rect.top) * scaleY;
+   499→    const defaults = FIELD_DEFAULTS[activeTool];
+   500→    const signer = tempSigners.find((_, i) => `temp-${i}` === activeSignerId);
+   501→
+   502→    try {
+   503→      const field = await fieldsApi.create(store.editingDocumentId, {
+   504→        type: activeTool,
+   505→        pageNumber: pageIndex + 1,
+   506→        x, y,
+   507→        width: defaults.width,
+   508→        height: defaults.height,
+   509→        signerId: signer ? undefined : undefined,
+   510→      });
+   511→      setPlacedFields((prev) => [...prev, {
+   512→        id: field.id,
+   513→        type: activeTool,
+   514→        pageNumber: pageIndex + 1,
+   515→        x: field.x,
+   516→        y: field.y,
+   517→        width: field.width,
+   518→        height: field.height,
+   519→        signerId: activeSignerId || undefined,
+   520→        signerName: signer?.name,
+   521→        signerColor: signer?.color,
+   522→      }]);
+   523→      toast.success(`${activeTool} field added`);
+   524→    } catch (err: any) {
+   525→      toast.error(err.message || 'Failed to add field');
+   526→    }
+   527→  };
+   528→
+   529→  const handleDeleteField = async (fieldId: string) => {
+   530→    try {
+   531→      await fieldsApi.delete(fieldId);
+   532→      setPlacedFields((prev) => prev.filter((f) => f.id !== fieldId));
+   533→      toast.success('Field removed');
+   534→    } catch {
+   535→      toast.error('Failed to remove field');
+   536→    }
+   537→  };
+   538→
+   539→  const handleAssignSigner = async (fieldId: string, signerIndex: number) => {
+   540→    if (!store.editingDocumentId) return;
+   541→    const signer = tempSigners[signerIndex];
+   542→    const signerId = `temp-${signerIndex}`;
+   543→    try {
+   544→      // We update locally, the actual signer assignment happens on send
+   545→      setPlacedFields((prev) => prev.map((f) =>
+   546→        f.id === fieldId ? { ...f, signerId, signerName: signer.name, signerColor: signer.color } : f
+   547→      ));
+   548→      toast.success(`Field assigned to ${signer.name}`);
+   549→    } catch {
+   550→      toast.error('Failed to assign signer');
+   551→    }
+   552→  };
+   553→
+   554→  const handleFieldDragStart = (fieldId: string, e: React.MouseEvent) => {
+   555→    const field = placedFields.find(f => f.id === fieldId);
+   556→    if (!field) return;
+   557→    setDraggingField(fieldId);
+   558→    // We'll use a simplified approach: calculate offset from field center
+   559→  };
+   560→
+   561→  const handleFieldDrag = useCallback((e: MouseEvent) => {
+   562→    if (!draggingField) return;
+   563→    // Simplified: we handle movement via mouse move on the page container
+   564→  }, [draggingField]);
+   565→
+   566→  const handleFieldDragEnd = useCallback(() => {
+   567→    setDraggingField(null);
+   568→  }, []);
+   569→
+   570→  useEffect(() => {
+   571→    if (draggingField) {
+   572→      window.addEventListener('mousemove', handleFieldDrag);
+   573→      window.addEventListener('mouseup', handleFieldDragEnd);
+   574→      return () => {
+   575→        window.removeEventListener('mousemove', handleFieldDrag);
+   576→        window.removeEventListener('mouseup', handleFieldDragEnd);
+   577→      };
+   578→    }
+   579→  }, [draggingField, handleFieldDrag, handleFieldDragEnd]);
+   580→
+   581→  const handleSendForSigning = async () => {
+   582→    if (!store.editingDocumentId || !editorDoc) return;
+   583→    const assignedFields = placedFields.filter(f => f.signerId);
+   584→    if (tempSigners.length === 0) { toast.error('Add at least one signer'); return; }
+   585→    if (assignedFields.length === 0) { toast.error('Assign at least one field to a signer'); return; }
+   586→
+   587→    setSending(true);
+   588→    try {
+   589→      // Build field assignments map: { fieldId, signerIndex }
+   590→      const fieldAssignments = assignedFields.map(f => ({
+   591→        fieldId: f.id,
+   592→        signerIndex: parseInt(f.signerId!.replace('temp-', ''), 10),
+   593→      }));
+   594→
+   595→      const result = await documentsApi.send(store.editingDocumentId, tempSigners.map(s => ({ email: s.email, name: s.name })), fieldAssignments);
+   596→      toast.success('Document sent for signing!');
+   597→      store.setView('dashboard');
+   598→    } catch (err: any) {
+   599→      toast.error(err.message || 'Failed to send');
+   600→    } finally {
+   601→      setSending(false);
+   602→    }
+   603→  };
+   604→
+   605→  // ============ VIEWER ============
+   606→  const loadViewer = useCallback(async () => {
+   607→    if (!store.viewingDocumentId) return;
+   608→    setViewerLoading(true);
+   609→    setViewerPdfLoading(true);
+   610→    try {
+   611→      const doc = await documentsApi.get(store.viewingDocumentId);
+   612→      setViewerDoc(doc);
+   613→
+   614→      const token = localStorage.getItem('token');
+   615→      const pdfPath = doc.signedPdfPath || doc.originalPdfPath;
+   616→      const res = await fetch(`/api/documents/${store.viewingDocumentId}/download`, {
+   617→        headers: { Authorization: `Bearer ${token}` },
+   618→      });
+   619→      const blob = await res.blob();
+   620→      const pdfUrl = URL.createObjectURL(blob);
+   621→      const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+   622→      const rendered: typeof viewerPages = [];
+   623→      for (let i = 1; i <= pdf.numPages; i++) {
+   624→        const page = await pdf.getPage(i);
+   625→        const scale = 1.5;
+   626→        const viewport = page.getViewport({ scale });
+   627→        const canvas = document.createElement('canvas');
+   628→        canvas.width = viewport.width;
+   629→        canvas.height = viewport.height;
+   630→        const ctx = canvas.getContext('2d')!;
+   631→        await page.render({ canvasContext: ctx, viewport }).promise;
+   632→        rendered.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.9), width: viewport.width, height: viewport.height, pageNumber: i });
+   633→      }
+   634→      setViewerPages(rendered);
+   635→
+   636→      // Load audit logs
+   637→      const logs = await documentsApi.audit(store.viewingDocumentId);
+   638→      setAuditLogs(logs);
+   639→    } catch (err) {
+   640→      toast.error('Failed to load document');
+   641→      console.error(err);
+   642→    } finally {
+   643→      setViewerLoading(false);
+   644→      setViewerPdfLoading(false);
+   645→    }
+   646→  }, [store.viewingDocumentId]);
+   647→
+   648→  useEffect(() => {
+   649→    if (store.currentView === 'viewer') loadViewer();
+   650→  }, [store.currentView, loadViewer]);
+   651→
+   652→  const handleDownload = async () => {
+   653→    if (!store.viewingDocumentId) return;
+   654→    try {
+   655→      const url = await documentsApi.download(store.viewingDocumentId);
+   656→      const a = document.createElement('a');
+   657→      a.href = url;
+   658→      a.download = `${viewerDoc?.title || 'document'}-signed.pdf`;
+   659→      a.click();
+   660→      URL.revokeObjectURL(url);
+   661→      toast.success('Download started');
+   662→    } catch {
+   663→      toast.error('Download failed');
+   664→    }
+   665→  };
+   666→
+   667→  // ============ SIGNING (GUEST) ============
+   668→  useEffect(() => {
+   669→    if (!store.signingToken) return;
+   670→    setSigningPdfLoading(true);
+   671→    setSigningLoading(true);
+   672→    (async () => {
+   673→      try {
+   674→        const info = await signingApi.getInfo(store.signingToken!);
+   675→        setSigningInfo(info);
+   676→
+   677→        // Initialize field values and persist dates to server
+   678→        const vals: Record<string, string> = {};
+   679→        for (const f of info.signer.fields) {
+   680→          const val = f.type === 'date' ? new Date().toLocaleDateString() : (f.value || '');
+   681→          vals[f.id] = val;
+   682→          // Persist initial values (especially dates) to server
+   683→          if (val) {
+   684→            signingApi.updateField(store.signingToken!, f.id, val).catch(() => {});
+   685→          }
+   686→        }
+   687→        setSigningFieldValues(vals);
+   688→
+   689→        // Load PDF
+   690→        const res = await fetch(`/api/sign/${store.signingToken}/file`);
+   691→        const blob = await res.blob();
+   692→        const pdfUrl = URL.createObjectURL(blob);
+   693→        const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+   694→        const rendered: typeof signingPages = [];
+   695→        for (let i = 1; i <= pdf.numPages; i++) {
+   696→          const page = await pdf.getPage(i);
+   697→          const scale = 1.5;
+   698→          const viewport = page.getViewport({ scale });
+   699→          const canvas = document.createElement('canvas');
+   700→          canvas.width = viewport.width;
+   701→          canvas.height = viewport.height;
+   702→          const ctx = canvas.getContext('2d')!;
+   703→          await page.render({ canvasContext: ctx, viewport }).promise;
+   704→          rendered.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.9), width: viewport.width, height: viewport.height, pageNumber: i });
+   705→        }
+   706→        setSigningPages(rendered);
+   707→      } catch (err: any) {
+   708→        toast.error(err.message || 'Failed to load signing document');
+   709→      } finally {
+   710→        setSigningPdfLoading(false);
+   711→        setSigningLoading(false);
+   712→      }
+   713→    })();
+   714→  }, [store.signingToken]);
+   715→
+   716→  const handleSigningFieldUpdate = async (fieldId: string, value: string) => {
+   717→    if (!store.signingToken) return;
+   718→    setSigningFieldValues(prev => ({ ...prev, [fieldId]: value }));
+   719→    try {
+   720→      await signingApi.updateField(store.signingToken, fieldId, value);
+   721→    } catch (err: any) {
+   722→      toast.error(err.message || 'Failed to save field');
+   723→    }
+   724→  };
+   725→
+   726→  const handleCompleteSigning = async () => {
+   727→    if (!store.signingToken || !signingInfo) return;
+   728→    // Check all fields filled
+   729→    const unfilled = signingInfo.signer.fields.filter(f => !signingFieldValues[f.id]?.trim());
+   730→    if (unfilled.length > 0) {
+   731→      toast.error(`Please fill all ${unfilled.length} remaining field(s)`);
+   732→      return;
+   733→    }
+   734→    setSigningLoading(true);
+   735→    try {
+   736→      await signingApi.complete(store.signingToken);
+   737→      setSigningComplete(true);
+   738→      toast.success('Signing completed successfully!');
+   739→    } catch (err: any) {
+   740→      toast.error(err.message || 'Failed to complete signing');
+   741→    } finally {
+   742→      setSigningLoading(false);
+   743→    }
+   744→  };
+   745→
+   746→  // ============ RENDER ============
+   747→  if (!mounted) return null;
+   748→
+   749→  // === SIGNING VIEW (Guest) ===
+   750→  if (store.signingToken) {
+   751→    if (signingPdfLoading) {
+   752→      return (
+   753→        <div className="min-h-screen flex items-center justify-center bg-background">
+   754→          <div className="text-center space-y-4">
+   755→            <Loader2 className="w-12 h-12 animate-spin mx-auto text-emerald-600" />
+   756→            <p className="text-lg text-muted-foreground">Loading document...</p>
+   757→          </div>
+   758→        </div>
+   759→      );
+   760→    }
+   761→
+   762→    if (signingComplete) {
+   763→      return (
+   764→        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+   765→          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md">
+   766→            <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+   767→              <CheckCircle2 className="w-10 h-10 text-emerald-600" />
+   768→            </div>
+   769→            <h1 className="text-2xl font-bold mb-2">Signing Complete!</h1>
+   770→            <p className="text-muted-foreground">Thank you, {signingInfo?.signer.name}. Your signature has been recorded.</p>
+   771→          </motion.div>
+   772→        </div>
+   773→      );
+   774→    }
+   775→
+   776→    if (!signingInfo) {
+   777→      return (
+   778→        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+   779→          <Card className="max-w-md w-full">
+   780→            <CardContent className="pt-6 text-center">
+   781→              <AlertCircle className="w-12 h-12 mx-auto text-destructive mb-4" />
+   782→              <h2 className="text-lg font-semibold mb-2">Invalid or Expired Link</h2>
+   783→              <p className="text-muted-foreground">This signing link is invalid or has expired.</p>
+   784→            </CardContent>
+   785→          </Card>
+   786→        </div>
+   787→      );
+   788→    }
+   789→
+   790→    return (
+   791→      <div className="min-h-screen flex flex-col bg-background">
+   792→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+   793→          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+   794→            <div className="flex items-center gap-3">
+   795→              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+   796→                <FileSignature className="w-5 h-5 text-white" />
+   797→              </div>
+   798→              <div>
+   799→                <h1 className="font-semibold text-sm">{signingInfo.document.title}</h1>
+   800→                <p className="text-xs text-muted-foreground">Sign as: {signingInfo.signer.name} ({signingInfo.signer.email})</p>
+   801→              </div>
+   802→            </div>
+   803→            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Signing</Badge>
+   804→          </div>
+   805→        </header>
+   806→
+   807→        <main className="flex-1 max-w-4xl mx-auto w-full p-4 space-y-4 pb-32">
+   808→          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-3">
+   809→            <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+   810→            <p className="text-sm text-amber-800 dark:text-amber-300">
+   811→              Please review the document and fill all required fields. Click on a highlighted field to add your {signingInfo.signer.fields.some(f => f.type === 'signature') ? 'signature, ' : ''}date, or text.
+   812→            </p>
+   813→          </div>
+   814→
+   815→          {signingPages.map((page, idx) => {
+   816→            const pageFields = signingInfo.signer.fields.filter(f => f.pageNumber === page.pageNumber);
+   817→            return (
+   818→              <div key={idx} className="space-y-2">
+   819→                <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {signingPages.length}</p>
+   820→                <div
+   821→                  className="relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white"
+   822→                  style={{ maxWidth: 612 }}
+   823→                >
+   824→                  <img
+   825→                    src={page.dataUrl}
+   826→                    alt={`Page ${page.pageNumber}`}
+   827→                    className="w-full h-auto"
+   828→                    draggable={false}
+   829→                  />
+   830→                  {/* Field overlays */}
+   831→                  {pageFields.map(field => {
+   832→                    const scaleX = 100 / 612;
+   833→                    const scaleY = 100 / 792;
+   834→                    const filled = !!signingFieldValues[field.id]?.trim();
+   835→                    return (
+   836→                      <div
+   837→                        key={field.id}
+   838→                        className={`absolute border-2 rounded cursor-pointer transition-all ${filled ? 'border-emerald-400 bg-emerald-50/80' : 'border-amber-400 bg-amber-50/80 hover:bg-amber-100/80'} ${activeSigningField === field.id ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
+   839→                        style={{
+   840→                          left: `${field.x * scaleX}%`,
+   841→                          top: `${field.y * scaleY}%`,
+   842→                          width: `${field.width * scaleX}%`,
+   843→                          height: `${field.height * scaleY}%`,
+   844→                        }}
+   845→                        onClick={() => setActiveSigningField(filled ? null : field.id)}
+   846→                      >
+   847→                        {filled ? (
+   848→                          <div className="w-full h-full flex items-center justify-center p-1 overflow-hidden">
+   849→                            {field.type === 'signature' && signingFieldValues[field.id]?.startsWith('data:') ? (
+   850→                              <img src={signingFieldValues[field.id]} alt="Signature" className="h-full object-contain" />
+   851→                            ) : (
+   852→                              <span className="text-xs font-medium truncate">{signingFieldValues[field.id]}</span>
+   853→                            )}
+   854→                          </div>
+   855→                        ) : (
+   856→                          <div className="w-full h-full flex items-center justify-center gap-1">
+   857→                            {field.type === 'signature' && <PenLine className="w-3 h-3 text-amber-600" />}
+   858→                            {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
+   859→                            {field.type === 'text' && <Type className="w-3 h-3 text-amber-600" />}
+   860→                            <span className="text-xs text-amber-700 font-medium capitalize">{field.type}</span>
+   861→                          </div>
+   862→                        )}
+   863→                      </div>
+   864→                    );
+   865→                  })}
+   866→                </div>
+   867→              </div>
+   868→            );
+   869→          })}
+   870→        </main>
+   871→
+   872→        {/* Signing field editor (sticky bottom) */}
+   873→        {activeSigningField && (() => {
+   874→          const field = signingInfo.signer.fields.find(f => f.id === activeSigningField);
+   875→          if (!field) return null;
+   876→          return (
+   877→            <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg z-50">
+   878→              <div className="max-w-2xl mx-auto p-4">
+   879→                <div className="flex items-center justify-between mb-3">
+   880→                  <h3 className="font-semibold capitalize flex items-center gap-2">
+   881→                    {field.type === 'signature' && <PenLine className="w-4 h-4" />}
+   882→                    {field.type === 'date' && <CalendarDays className="w-4 h-4" />}
+   883→                    {field.type === 'text' && <Type className="w-4 h-4" />}
+   884→                    {field.type} Field
+   885→                  </h3>
+   886→                  <Button variant="ghost" size="sm" onClick={() => setActiveSigningField(null)}>
+   887→                    <X className="w-4 h-4" />
+   888→                  </Button>
+   889→                </div>
+   890→
+   891→                {field.type === 'signature' && (
+   892→                  <Tabs defaultValue="draw">
+   893→                    <TabsList className="grid w-full grid-cols-3">
+   894→                      <TabsTrigger value="draw"><PenLine className="w-3 h-3 mr-1" /> Draw</TabsTrigger>
+   895→                      <TabsTrigger value="type"><Edit3 className="w-3 h-3 mr-1" /> Type</TabsTrigger>
+   896→                      <TabsTrigger value="upload"><ImageIcon className="w-3 h-3 mr-1" /> Upload</TabsTrigger>
+   897→                    </TabsList>
+   898→                    <TabsContent value="draw" className="mt-3">
+   899→                      <SignatureCanvas onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+   900→                    </TabsContent>
+   901→                    <TabsContent value="type" className="mt-3">
+   902→                      <TypeSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+   903→                    </TabsContent>
+   904→                    <TabsContent value="upload" className="mt-3">
+   905→                      <UploadSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+   906→                    </TabsContent>
+   907→                  </Tabs>
+   908→                )}
+   909→
+   910→                {field.type === 'date' && (
+   911→                  <div className="space-y-3">
+   912→                    <Input
+   913→                      type="date"
+   914→                      value={signingFieldValues[field.id] || ''}
+   915→                      onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value)}
+   916→                    />
+   917→                    <Button size="sm" onClick={() => handleSigningFieldUpdate(field.id, new Date().toLocaleDateString())} variant="outline" className="w-full">
+   918→                      <CalendarDays className="w-4 h-4 mr-1" /> Use Today&apos;s Date
+   919→                    </Button>
+   920→                  </div>
+   921→                )}
+   922→
+   923→                {field.type === 'text' && (
+   924→                  <div className="space-y-3">
+   925→                    <Input
+   926→                      placeholder="Enter text..."
+   927→                      value={signingFieldValues[field.id] || ''}
+   928→                      onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value)}
+   929→                    />
+   930→                  </div>
+   931→                )}
+   932→              </div>
+   933→            </div>
+   934→          );
+   935→        })()}
+   936→
+   937→        {/* Complete signing button */}
+   938→        {!activeSigningField && (
+   939→          <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40 p-4">
+   940→            <div className="max-w-2xl mx-auto">
+   941→              <Button
+   942→                onClick={handleCompleteSigning}
+   943→                disabled={signingLoading}
+   944→                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-12 text-base"
+   945→              >
+   946→                {signingLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Complete Signing</>}
+   947→              </Button>
+   948→            </div>
+   949→          </div>
+   950→        )}
+   951→
+   952→        <footer className="border-t py-3 text-center text-xs text-muted-foreground">
+   953→          Secured by OpenSign-compliant cryptographic sealing
+   954→        </footer>
+   955→      </div>
+   956→    );
+   957→  }
+   958→
+   959→  // === AUTH VIEW ===
+   960→  if (store.currentView === 'auth' || !store.user) {
+   961→    return (
+   962→      <div className="min-h-screen flex flex-col bg-background">
+   963→        <main className="flex-1 flex items-center justify-center p-4">
+   964→          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full max-w-md">
+   965→            {/* Hero */}
+   966→            <div className="text-center mb-8">
+   967→              <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-600/20">
+   968→                <FileSignature className="w-9 h-9 text-white" />
+   969→              </div>
+   970→              <h1 className="text-3xl font-bold tracking-tight">OpenSign</h1>
+   971→              <p className="text-muted-foreground mt-2">Secure document signing. Cryptographically sealed. ESIGN compliant.</p>
+   972→            </div>
+   973→
+   974→            <Card className="shadow-lg">
+   975→              <CardHeader className="pb-2">
+   976→                <Tabs value={authMode} onValueChange={(v) => setAuthMode(v as 'login' | 'register')}>
+   977→                  <TabsList className="grid w-full grid-cols-2">
+   978→                    <TabsTrigger value="login">Sign In</TabsTrigger>
+   979→                    <TabsTrigger value="register">Register</TabsTrigger>
+   980→                  </TabsList>
+   981→                </Tabs>
+   982→              </CardHeader>
+   983→              <CardContent className="pt-4 space-y-4">
+   984→                {authMode === 'register' && (
+   985→                  <div className="space-y-2">
+   986→                    <label className="text-sm font-medium">Full Name</label>
+   987→                    <Input placeholder="John Doe" value={authName} onChange={(e) => setAuthName(e.target.value)} />
+   988→                  </div>
+   989→                )}
+   990→                <div className="space-y-2">
+   991→                  <label className="text-sm font-medium">Email</label>
+   992→                  <Input type="email" placeholder="you@example.com" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+   993→                </div>
+   994→                <div className="space-y-2">
+   995→                  <label className="text-sm font-medium">Password</label>
+   996→                  <Input type="password" placeholder="••••••••" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAuth()} />
+   997→                </div>
+   998→                <Button onClick={handleAuth} disabled={authLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
+   999→                  {authLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : authMode === 'login' ? 'Sign In' : 'Create Account'}
+  1000→                </Button>
+  1001→              </CardContent>
+  1002→            </Card>
+  1003→
+  1004→            <div className="flex items-center justify-center gap-6 mt-6 text-xs text-muted-foreground">
+  1005→              <div className="flex items-center gap-1"><Shield className="w-3.5 h-3.5" /> AES-256 Encrypted</div>
+  1006→              <div className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> ESIGN Compliant</div>
+  1007→              <div className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Audit Trail</div>
+  1008→            </div>
+  1009→          </motion.div>
+  1010→        </main>
+  1011→        <footer className="border-t py-4 text-center text-xs text-muted-foreground">
+  1012→          OpenSign-compliant PDF Signing Platform
+  1013→        </footer>
+  1014→      </div>
+  1015→    );
+  1016→  }
+  1017→
+  1018→  // === DASHBOARD VIEW ===
+  1019→  if (store.currentView === 'dashboard') {
+  1020→    return (
+  1021→      <div className="min-h-screen flex flex-col bg-background">
+  1022→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+  1023→          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+  1024→            <div className="flex items-center gap-3">
+  1025→              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+  1026→                <FileSignature className="w-5 h-5 text-white" />
+  1027→              </div>
+  1028→              <span className="font-bold text-lg">OpenSign</span>
+  1029→            </div>
+  1030→            <div className="flex items-center gap-3">
+  1031→              <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
+  1032→              <Button variant="ghost" size="sm" onClick={store.logout}>
+  1033→                <LogOut className="w-4 h-4" />
+  1034→              </Button>
+  1035→            </div>
+  1036→          </div>
+  1037→        </header>
+  1038→
+  1039→        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6">
+  1040→          <div className="flex items-center justify-between mb-6">
+  1041→            <div>
+  1042→              <h1 className="text-2xl font-bold">Documents</h1>
+  1043→              <p className="text-sm text-muted-foreground">Manage and send documents for signing</p>
+  1044→            </div>
+  1045→            <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+  1046→              <Plus className="w-4 h-4 mr-2" /> New Document
+  1047→            </Button>
+  1048→          </div>
+  1049→
+  1050→          {dashLoading ? (
+  1051→            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+  1052→          ) : documents.length === 0 ? (
+  1053→            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
+  1054→              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+  1055→                <FileText className="w-8 h-8 text-muted-foreground" />
+  1056→              </div>
+  1057→              <h3 className="text-lg font-semibold mb-1">No documents yet</h3>
+  1058→              <p className="text-sm text-muted-foreground mb-4">Upload a PDF to get started with document signing</p>
+  1059→              <Button variant="outline" onClick={() => setUploadDialog(true)}>
+  1060→                <Upload className="w-4 h-4 mr-2" /> Upload PDF
+  1061→              </Button>
+  1062→            </motion.div>
+  1063→          ) : (
+  1064→            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  1065→              {documents.map((doc, i) => (
+  1066→                <motion.div
+  1067→                  key={doc.id}
+  1068→                  initial={{ y: 10, opacity: 0 }}
+  1069→                  animate={{ y: 0, opacity: 1 }}
+  1070→                  transition={{ delay: i * 0.05 }}
+  1071→                >
+  1072→                  <Card
+  1073→                    className="cursor-pointer hover:shadow-md transition-shadow group"
+  1074→                    onClick={() => {
+  1075→                      if (doc.status === 'Draft') {
+  1076→                        store.setEditingDocument(doc.id);
+  1077→                        store.setView('editor');
+  1078→                      } else {
+  1079→                        store.setViewingDocument(doc.id);
+  1080→                        store.setView('viewer');
+  1081→                      }
+  1082→                    }}
+  1083→                  >
+  1084→                    <CardHeader className="pb-3">
+  1085→                      <div className="flex items-start justify-between">
+  1086→                        <div className="flex items-center gap-3">
+  1087→                          <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center group-hover:bg-emerald-50 transition-colors">
+  1088→                            <FileText className="w-5 h-5 text-muted-foreground" />
+  1089→                          </div>
+  1090→                          <div className="min-w-0">
+  1091→                            <CardTitle className="text-sm font-semibold truncate">{doc.title}</CardTitle>
+  1092→                            <p className="text-xs text-muted-foreground">{formatDate(doc.createdAt)}</p>
+  1093→                          </div>
+  1094→                        </div>
+  1095→                        <div className="flex items-center gap-1">
+  1096→                          <StatusBadge status={doc.status} />
+  1097→                          {doc.status === 'Draft' && (
+  1098→                            <Button
+  1099→                              variant="ghost"
+  1100→                              size="icon"
+  1101→                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+  1102→                              onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}
+  1103→                            >
+  1104→                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+  1105→                            </Button>
+  1106→                          )}
+  1107→                        </div>
+  1108→                      </div>
+  1109→                    </CardHeader>
+  1110→                    <CardContent className="pt-0">
+  1111→                      {doc.signerCount > 0 && (
+  1112→                        <div className="flex items-center justify-between">
+  1113→                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+  1114→                            <Users className="w-3.5 h-3.5" />
+  1115→                            {doc.signedCount}/{doc.signerCount} signed
+  1116→                          </div>
+  1117→                          <Progress value={(doc.signedCount / doc.signerCount) * 100} className="h-1.5 w-20" />
+  1118→                        </div>
+  1119→                      )}
+  1120→                    </CardContent>
+  1121→                  </Card>
+  1122→                </motion.div>
+  1123→              ))}
+  1124→            </div>
+  1125→          )}
+  1126→        </main>
+  1127→
+  1128→        {/* Upload Dialog */}
+  1129→        <Dialog open={uploadDialog} onOpenChange={setUploadDialog}>
+  1130→          <DialogContent>
+  1131→            <DialogHeader>
+  1132→              <DialogTitle>Upload Document</DialogTitle>
+  1133→            </DialogHeader>
+  1134→            <div className="space-y-4">
+  1135→              <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-emerald-400 transition-colors"
+  1136→                onClick={() => document.getElementById('pdf-upload')?.click()}
+  1137→              >
+  1138→                {uploadFile ? (
+  1139→                  <div className="flex items-center justify-center gap-2">
+  1140→                    <FileText className="w-5 h-5 text-emerald-600" />
+  1141→                    <span className="text-sm font-medium">{uploadFile.name}</span>
+  1142→                  </div>
+  1143→                ) : (
+  1144→                  <>
+  1145→                    <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+  1146→                    <p className="text-sm text-muted-foreground">Click to select a PDF file</p>
+  1147→                  </>
+  1148→                )}
+  1149→                <input id="pdf-upload" type="file" accept=".pdf" className="hidden" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
+  1150→              </div>
+  1151→              <div className="space-y-2">
+  1152→                <label className="text-sm font-medium">Document Title</label>
+  1153→                <Input placeholder="Enter document title..." value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} />
+  1154→              </div>
+  1155→            </div>
+  1156→            <DialogFooter>
+  1157→              <Button variant="outline" onClick={() => setUploadDialog(false)}>Cancel</Button>
+  1158→              <Button onClick={handleUpload} disabled={!uploadFile || uploading} className="bg-emerald-600 hover:bg-emerald-700">
+  1159→                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4 mr-2" /> Upload</>}
+  1160→              </Button>
+  1161→            </DialogFooter>
+  1162→          </DialogContent>
+  1163→        </Dialog>
+  1164→
+  1165→        <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto">
+  1166→          OpenSign-compliant PDF Signing Platform
+  1167→        </footer>
+  1168→      </div>
+  1169→    );
+  1170→  }
+  1171→
+  1172→  // === EDITOR VIEW ===
+  1173→  if (store.currentView === 'editor') {
+  1174→    if (editorLoading) {
+  1175→      return (
+  1176→        <div className="min-h-screen flex items-center justify-center">
+  1177→          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+  1178→        </div>
+  1179→      );
+  1180→    }
+  1181→
+  1182→    if (!editorDoc) return null;
+  1183→
+  1184→    const assignedCount = placedFields.filter(f => f.signerId).length;
+  1185→    const canSend = tempSigners.length > 0 && assignedCount > 0;
+  1186→
+  1187→    return (
+  1188→      <div className="min-h-screen flex flex-col bg-background">
+  1189→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+  1190→          <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
+  1191→            <div className="flex items-center gap-3">
+  1192→              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setEditingDocument(null); }}>
+  1193→                <ArrowLeft className="w-4 h-4" />
+  1194→              </Button>
+  1195→              <div>
+  1196→                <h1 className="font-semibold text-sm truncate max-w-[200px] sm:max-w-none">{editorDoc.title}</h1>
+  1197→                <div className="flex items-center gap-2">
+  1198→                  <StatusBadge status={editorDoc.status} />
+  1199→                  <span className="text-xs text-muted-foreground">{pdfPages.length} page{pdfPages.length !== 1 ? 's' : ''}</span>
+  1200→                </div>
+  1201→              </div>
+  1202→            </div>
+  1203→            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+  1204→              {tempSigners.length > 0 && <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>}
+  1205→              {assignedCount > 0 && <span>· {assignedCount} field{assignedCount !== 1 ? 's' : ''} assigned</span>}
+  1206→            </div>
+  1207→          </div>
+  1208→        </header>
+  1209→
+  1210→        <div className="flex-1 flex overflow-hidden">
+  1211→          {/* Left sidebar: Field tools */}
+  1212→          <div className="w-56 border-r bg-muted/30 p-4 space-y-4 hidden lg:block">
+  1213→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Field Types</h3>
+  1214→            <div className="space-y-2">
+  1215→              {([
+  1216→                { type: 'signature' as const, icon: PenLine, label: 'Signature', color: 'emerald' },
+  1217→                { type: 'date' as const, icon: CalendarDays, label: 'Date', color: 'amber' },
+  1218→                { type: 'text' as const, icon: Type, label: 'Text', color: 'neutral' },
+  1219→              ]).map(tool => (
+  1220→                <Button
+  1221→                  key={tool.type}
+  1222→                  variant={activeTool === tool.type ? 'default' : 'outline'}
+  1223→                  className={`w-full justify-start gap-2 ${activeTool === tool.type ? 'bg-emerald-600 hover:bg-emerald-700' : ''}`}
+  1224→                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+  1225→                >
+  1226→                  <tool.icon className="w-4 h-4" />
+  1227→                  {tool.label}
+  1228→                  {activeTool === tool.type && <MousePointer className="w-3 h-3 ml-auto" />}
+  1229→                </Button>
+  1230→              ))}
+  1231→            </div>
+  1232→
+  1233→            <Separator />
+  1234→
+  1235→            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Signers</h3>
+  1236→            <div className="space-y-2">
+  1237→              {tempSigners.map((signer, i) => (
+  1238→                <div
+  1239→                  key={i}
+  1240→                  className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors text-sm ${activeSignerId === `temp-${i}` ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+  1241→                  onClick={() => setActiveSignerId(activeSignerId === `temp-${i}` ? null : `temp-${i}`)}
+  1242→                >
+  1243→                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: signer.color }} />
+  1244→                  <div className="min-w-0 flex-1">
+  1245→                    <p className="truncate text-xs font-medium">{signer.name}</p>
+  1246→                    <p className="truncate text-xs opacity-70">{signer.email}</p>
+  1247→                  </div>
+  1248→                  <Button
+  1249→                    variant="ghost"
+  1250→                    size="icon"
+  1251→                    className="h-5 w-5"
+  1252→                    onClick={(e) => { e.stopPropagation(); setTempSigners(tempSigners.filter((_, j) => j !== i)); }}
+  1253→                  >
+  1254→                    <X className="w-3 h-3" />
+  1255→                  </Button>
+  1256→                </div>
+  1257→              ))}
+  1258→              <div className="space-y-1.5">
+  1259→                <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs" />
+  1260→                <Input placeholder="Email" type="email" value={newSignerEmail} onChange={(e) => setNewSignerEmail(e.target.value)} className="h-8 text-xs" onKeyDown={(e) => e.key === 'Enter' && addSigner()} />
+  1261→                <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={addSigner} disabled={!newSignerName.trim() || !newSignerEmail.trim()}>
+  1262→                  <Plus className="w-3 h-3 mr-1" /> Add Signer
+  1263→                </Button>
+  1264→              </div>
+  1265→            </div>
+  1266→
+  1267→            <Separator />
+  1268→
+  1269→            {/* Mobile field tools */}
+  1270→            <div className="lg:hidden space-y-2">
+  1271→              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tools</h3>
+  1272→              {[
+  1273→                { type: 'signature' as const, icon: PenLine, label: 'Signature' },
+  1274→                { type: 'date' as const, icon: CalendarDays, label: 'Date' },
+  1275→                { type: 'text' as const, icon: Type, label: 'Text' },
+  1276→              ].map(tool => (
+  1277→                <Button
+  1278→                  key={tool.type}
+  1279→                  variant={activeTool === tool.type ? 'default' : 'outline'}
+  1280→                  size="sm"
+  1281→                  className={`w-full justify-start gap-2 ${activeTool === tool.type ? 'bg-emerald-600' : ''}`}
+  1282→                  onClick={() => setActiveTool(activeTool === tool.type ? null : tool.type)}
+  1283→                >
+  1284→                  <tool.icon className="w-4 h-4" /> {tool.label}
+  1285→                </Button>
+  1286→              ))}
+  1287→            </div>
+  1288→          </div>
+  1289→
+  1290→          {/* PDF Area */}
+  1291→          <div className="flex-1 overflow-auto p-4 space-y-6">
+  1292→            {pdfLoading ? (
+  1293→              <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+  1294→            ) : (
+  1295→              pdfPages.map((page, idx) => {
+  1296→                const pageFields = placedFields.filter(f => f.pageNumber === page.pageNumber);
+  1297→                return (
+  1298→                  <div key={idx} className="space-y-2">
+  1299→                    <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {pdfPages.length}</p>
+  1300→                    <div
+  1301→                      className={`relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white ${activeTool ? 'cursor-crosshair' : ''}`}
+  1302→                      style={{ maxWidth: 612 }}
+  1303→                      onClick={(e) => {
+  1304→                        const target = e.target as HTMLElement;
+  1305→                        if (target.closest('[data-field]')) return;
+  1306→                        handlePageClick(e, idx);
+  1307→                      }}
+  1308→                    >
+  1309→                      <img src={page.dataUrl} alt={`Page ${page.pageNumber}`} className="w-full h-auto" draggable={false} />
+  1310→                      {pageFields.map(field => (
+  1311→                        <div
+  1312→                          key={field.id}
+  1313→                          data-field
+  1314→                          className={`absolute border-2 rounded flex items-center justify-center transition-all group/field ${
+  1315→                            field.type === 'signature' ? 'border-emerald-400 bg-emerald-50/70' :
+  1316→                            field.type === 'date' ? 'border-amber-400 bg-amber-50/70' :
+  1317→                            'border-neutral-400 bg-neutral-50/70'
+  1318→                          } ${field.signerColor ? `ring-2` : ''}`}
+  1319→                          style={{
+  1320→                            left: `${(field.x / 612) * 100}%`,
+  1321→                            top: `${(field.y / 792) * 100}%`,
+  1322→                            width: `${(field.width / 612) * 100}%`,
+  1323→                            height: `${(field.height / 792) * 100}%`,
+  1324→                            ringColor: field.signerColor,
+  1325→                          }}
+  1326→                        >
+  1327→                          <div className="flex items-center gap-1 px-1">
+  1328→                            {field.type === 'signature' && <PenLine className="w-3 h-3 text-emerald-600" />}
+  1329→                            {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
+  1330→                            {field.type === 'text' && <Type className="w-3 h-3 text-neutral-600" />}
+  1331→                            <span className="text-[10px] font-medium truncate">
+  1332→                              {field.signerName || field.type}
+  1333→                            </span>
+  1334→                          </div>
+  1335→                          {/* Assign signer dropdown */}
+  1336→                          <div className="absolute top-full left-0 mt-1 bg-popover border rounded shadow-lg p-1 hidden group-hover/field:block z-10 min-w-[140px]">
+  1337→                            {tempSigners.map((s, si) => (
+  1338→                              <button
+  1339→                                key={si}
+  1340→                                className="w-full text-left px-2 py-1 text-xs hover:bg-muted rounded flex items-center gap-2"
+  1341→                                onClick={(e) => { e.stopPropagation(); handleAssignSigner(field.id, si); }}
+  1342→                              >
+  1343→                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+  1344→                                {s.name}
+  1345→                                {field.signerId === `temp-${si}` && <Check className="w-3 h-3 ml-auto text-emerald-600" />}
+  1346→                              </button>
+  1347→                            ))}
+  1348→                            {tempSigners.length === 0 && (
+  1349→                              <p className="text-xs text-muted-foreground px-2 py-1">Add signers first</p>
+  1350→                            )}
+  1351→                          </div>
+  1352→                          {/* Delete button */}
+  1353→                          <button
+  1354→                            className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover/field:opacity-100 transition-opacity"
+  1355→                            onClick={(e) => { e.stopPropagation(); handleDeleteField(field.id); }}
+  1356→                          >
+  1357→                            <X className="w-3 h-3" />
+  1358→                          </button>
+  1359→                        </div>
+  1360→                      ))}
+  1361→                      {activeTool && (
+  1362→                        <div className="absolute inset-0 border-2 border-dashed border-emerald-300 rounded-lg pointer-events-none" />
+  1363→                      )}
+  1364→                    </div>
+  1365→                  </div>
+  1366→                );
+  1367→              })
+  1368→            )}
+  1369→          </div>
+  1370→        </div>
+  1371→
+  1372→        {/* Bottom action bar */}
+  1373→        {editorDoc.status === 'Draft' && (
+  1374→          <div className="border-t bg-background p-4 sticky bottom-0">
+  1375→            <div className="max-w-[1400px] mx-auto flex items-center justify-between">
+  1376→              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+  1377→                <span>{placedFields.length} field{placedFields.length !== 1 ? 's' : ''}</span>
+  1378→                <span>·</span>
+  1379→                <span>{assignedCount} assigned</span>
+  1380→                <span>·</span>
+  1381→                <span>{tempSigners.length} signer{tempSigners.length !== 1 ? 's' : ''}</span>
+  1382→              </div>
+  1383→              <Button onClick={handleSendForSigning} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
+  1384→                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> Send for Signing</>}
+  1385→              </Button>
+  1386→            </div>
+  1387→          </div>
+  1388→        )}
+  1389→
+  1390→        <footer className="border-t py-3 text-center text-xs text-muted-foreground">
+  1391→          OpenSign-compliant PDF Signing Platform
+  1392→        </footer>
+  1393→      </div>
+  1394→    );
+  1395→  }
+  1396→
+  1397→  // === VIEWER VIEW ===
+  1398→  if (store.currentView === 'viewer') {
+  1399→    if (viewerLoading) {
+  1400→      return (
+  1401→        <div className="min-h-screen flex items-center justify-center">
+  1402→          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+  1403→        </div>
+  1404→      );
+  1405→    }
+  1406→
+  1407→    if (!viewerDoc) return null;
+  1408→
+  1409→    return (
+  1410→      <div className="min-h-screen flex flex-col bg-background">
+  1411→        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+  1412→          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+  1413→            <div className="flex items-center gap-3">
+  1414→              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setViewingDocument(null); }}>
+  1415→                <ArrowLeft className="w-4 h-4" />
+  1416→              </Button>
+  1417→              <div>
+  1418→                <h1 className="font-semibold text-sm truncate max-w-[300px]">{viewerDoc.title}</h1>
+  1419→                <div className="flex items-center gap-2">
+  1420→                  <StatusBadge status={viewerDoc.status} />
+  1421→                  <span className="text-xs text-muted-foreground">{formatDate(viewerDoc.createdAt)}</span>
+  1422→                </div>
+  1423→              </div>
+  1424→            </div>
+  1425→            <div className="flex items-center gap-2">
+  1426→              {viewerDoc.status === 'Completed' && (
+  1427→                <Button size="sm" onClick={handleDownload} className="bg-emerald-600 hover:bg-emerald-700">
+  1428→                  <Download className="w-4 h-4 mr-1" /> Download
+  1429→                </Button>
+  1430→              )}
+  1431→            </div>
+  1432→          </div>
+  1433→        </header>
+  1434→
+  1435→        <main className="flex-1 max-w-5xl mx-auto w-full p-4 sm:p-6 space-y-6">
+  1436→          {/* Signers Status */}
+  1437→          <Card>
+  1438→            <CardHeader className="pb-3">
+  1439→              <CardTitle className="text-sm flex items-center gap-2">
+  1440→                <Users className="w-4 h-4" /> Signers ({viewerDoc.signers.length})
+  1441→              </CardTitle>
+  1442→            </CardHeader>
+  1443→            <CardContent>
+  1444→              <div className="space-y-2">
+  1445→                {viewerDoc.signers.map((signer, i) => (
+  1446→                  <div key={signer.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
+  1447→                    <div className="flex items-center gap-3">
+  1448→                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+  1449→                        style={{ backgroundColor: `${SIGNER_COLORS[i % SIGNER_COLORS.length]}20`, color: SIGNER_COLORS[i % SIGNER_COLORS.length] }}
+  1450→                      >
+  1451→                        {signer.name.charAt(0).toUpperCase()}
+  1452→                      </div>
+  1453→                      <div>
+  1454→                        <p className="text-sm font-medium">{signer.name}</p>
+  1455→                        <p className="text-xs text-muted-foreground">{signer.email}</p>
+  1456→                      </div>
+  1457→                    </div>
+  1458→                    <div className="flex items-center gap-2">
+  1459→                      {!signer.signedAt && signer.token && (
+  1460→                        <Button
+  1461→                          variant="ghost"
+  1462→                          size="icon"
+  1463→                          className="h-7 w-7"
+  1464→                          title="Copy signing link"
+  1465→                          onClick={() => {
+  1466→                            const link = `${window.location.origin}/?sign=${signer.token}`;
+  1467→                            navigator.clipboard.writeText(link);
+  1468→                            toast.success('Signing link copied!');
+  1469→                          }}
+  1470→                        >
+  1471→                          <Copy className="w-3.5 h-3.5" />
+  1472→                        </Button>
+  1473→                      )}
+  1474→                      {signer.signedAt ? (
+  1475→                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+  1476→                          <Check className="w-3 h-3 mr-1" /> Signed
+  1477→                        </Badge>
+  1478→                      ) : (
+  1479→                        <Badge variant="secondary">Pending</Badge>
+  1480→                      )}
+  1481→                    </div>
+  1482→                  </div>
+  1483→                ))}
+  1484→              </div>
+  1485→            </CardContent>
+  1486→          </Card>
+  1487→
+  1488→          {/* PDF Pages */}
+  1489→          {viewerPdfLoading ? (
+  1490→            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+  1491→          ) : (
+  1492→            <div className="space-y-4">
+  1493→              {viewerPages.map((page, idx) => {
+  1494→                const pageFields = viewerDoc.fields.filter(f => f.pageNumber === page.pageNumber);
+  1495→                return (
+  1496→                  <div key={idx} className="space-y-1">
+  1497→                    <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {viewerPages.length}</p>
+  1498→                    <div className="relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white" style={{ maxWidth: 612 }}>
+  1499→                      <img src={page.dataUrl} alt={`Page ${page.pageNumber}`} className="w-full h-auto" draggable={false} />
+  1500→                      {pageFields.map(field => (
+  1501→                        <div
+  1502→                          key={field.id}
+  1503→                          className={`absolute border rounded flex items-center justify-center p-1 ${
+  1504→                            field.value
+  1505→                              ? 'border-emerald-400 bg-emerald-50/80'
+  1506→                              : 'border-muted-foreground/30 bg-muted/30'
+  1507→                          }`}
+  1508→                          style={{
+  1509→                            left: `${(field.x / 612) * 100}%`,
+  1510→                            top: `${(field.y / 792) * 100}%`,
+  1511→                            width: `${(field.width / 612) * 100}%`,
+  1512→                            height: `${(field.height / 792) * 100}%`,
+  1513→                          }}
+  1514→                        >
+  1515→                          {field.value && field.type === 'signature' && field.value.startsWith('data:') ? (
+  1516→                            <img src={field.value} alt="Signature" className="h-full object-contain" />
+  1517→                          ) : field.value ? (
+  1518→                            <span className="text-xs font-medium truncate">{field.value}</span>
+  1519→                          ) : (
+  1520→                            <span className="text-[10px] text-muted-foreground capitalize">{field.type}</span>
+  1521→                          )}
+  1522→                        </div>
+  1523→                      ))}
+  1524→                    </div>
+  1525→                  </div>
+  1526→                );
+  1527→              })}
+  1528→            </div>
+  1529→          )}
+  1530→
+  1531→          {/* Audit Trail */}
+  1532→          <Card>
+  1533→            <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowAudit(!showAudit)}>
+  1534→              <CardTitle className="text-sm flex items-center gap-2">
+  1535→                <Shield className="w-4 h-4" /> Audit Trail
+  1536→                <ChevronDown className={`w-4 h-4 transition-transform ${showAudit ? 'rotate-180' : ''}`} />
+  1537→              </CardTitle>
+  1538→            </CardHeader>
+  1539→            {showAudit && (
+  1540→              <CardContent>
+  1541→                {auditLogs.length === 0 ? (
+  1542→                  <p className="text-sm text-muted-foreground text-center py-4">No audit entries yet</p>
+  1543→                ) : (
+  1544→                  <div className="space-y-2">
+  1545→                    {auditLogs.map((log) => (
+  1546→                      <div key={log.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 text-sm">
+  1547→                        <div className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+  1548→                        <div className="flex-1 min-w-0">
+  1549→                          <div className="flex items-center justify-between gap-2">
+  1550→                            <Badge variant="secondary" className="text-xs font-mono">{log.action}</Badge>
+  1551→                            <span className="text-xs text-muted-foreground shrink-0">{formatDate(log.createdAt)}</span>
+  1552→                          </div>
+  1553→                          {log.details && <p className="text-xs text-muted-foreground mt-1">{log.details}</p>}
+  1554→                          {log.ipAddress && <p className="text-xs text-muted-foreground">IP: {log.ipAddress}</p>}
+  1555→                        </div>
+  1556→                      </div>
+  1557→                    ))}
+  1558→                  </div>
+  1559→                )}
+  1560→                <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+  1561→                  <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+  1562→                    🔒 ESIGN/eIDAS Compliant Audit Trail — All actions are cryptographically recorded with timestamps and IP addresses.
+  1563→                  </p>
+  1564→                </div>
+  1565→              </CardContent>
+  1566→            )}
+  1567→          </Card>
+  1568→        </main>
+  1569→
+  1570→        <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto">
+  1571→          OpenSign-compliant PDF Signing Platform
+  1572→        </footer>
+  1573→      </div>
+  1574→    );
+  1575→  }
+  1576→
+  1577→  return null;
+  1578→}

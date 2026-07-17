@@ -15,36 +15,60 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  documents  Document[]
-  auditLogs  AuditLog[]
+  documents    Document[]
+  auditLogs    AuditLog[]
+  templates    DocumentTemplate[]
+  savedSignatures SavedSignature[]
 }
 
 model Document {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   title           String
   originalPdfPath String
   signedPdfPath   String?
-  status          String   @default("Draft") // Draft, Sent, Signing, Completed
+  certificatePath String?
+  status          String    @default("Draft") // Draft, Sent, Signing, Completed, Rejected, Expired
   ownerId         String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  expiresAt       DateTime?
+  signedSelf      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  owner    User    @relation(fields: [ownerId], references: [id])
-  signers  Signer[]
-  fields   DocumentField[]
-  auditLogs AuditLog[]
+  owner      User           @relation(fields: [ownerId], references: [id])
+  signers    Signer[]
+  fields     DocumentField[]
+  ccRecipients CcRecipient[]
+  auditLogs  AuditLog[]
+  templateId String?
+  template   DocumentTemplate? @relation(fields: [templateId], references: [id])
+}
+
+model DocumentTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  fieldConfig String // JSON: array of field definitions
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents Document[]
 }
 
 model Signer {
-  id         String    @id @default(cuid())
-  email      String
-  name       String
-  order      Int       @default(1)
-  signedAt   DateTime?
-  token      String    @unique
-  documentId String
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  email          String
+  name           String
+  order          Int       @default(1)
+  signedAt       DateTime?
+  rejectedAt     DateTime?
+  rejectionReason String?
+  token          String    @unique
+  otpCode        String?
+  otpVerifiedAt  DateTime?
+  documentId     String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   document Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   fields   DocumentField[]
@@ -52,7 +76,9 @@ model Signer {
 
 model DocumentField {
   id         String   @id @default(cuid())
-  type       String   // signature, date, text
+  type       String   // signature, date, text, initials, checkbox
+  label      String?
+  required   Boolean  @default(true)
   pageNumber Int
   x          Float
   y          Float
@@ -66,6 +92,27 @@ model DocumentField {
 
   signer   Signer?  @relation(fields: [signerId], references: [id], onDelete: SetNull)
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model CcRecipient {
+  id         String   @id @default(cuid())
+  email      String
+  name       String
+  documentId String
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model SavedSignature {
+  id        String   @id @default(cuid())
+  name      String
+  dataUrl   String   // base64 image data
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {
