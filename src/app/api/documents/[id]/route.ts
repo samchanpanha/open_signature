@@ -64,6 +64,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       fields: document.fields.map((f) => ({
         id: f.id,
         type: f.type,
+        label: f.label,
+        required: f.required,
+        options: f.options ? JSON.parse(f.options) : null,
         pageNumber: f.pageNumber,
         x: f.x,
         y: f.y,

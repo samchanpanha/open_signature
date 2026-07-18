@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { documentId, type, pageNumber, x, y, width, height, signerId, label, required } = await req.json();
+    const { documentId, type, pageNumber, x, y, width, height, signerId, label, required, options } = await req.json();
 
     // Verify document ownership
     const doc = await db.document.findFirst({
@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
         signerId: signerId || null,
         label: label || null,
         required: required !== undefined ? required : true,
+        options: options ? JSON.stringify(options) : null,
       },
     });
 
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest) {
       type: field.type,
       label: field.label,
       required: field.required,
+      options: field.options ? JSON.parse(field.options) : null,
       pageNumber: field.pageNumber,
       x: field.x,
       y: field.y,

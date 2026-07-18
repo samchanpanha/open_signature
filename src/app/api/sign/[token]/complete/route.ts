@@ -106,7 +106,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
                 height: Math.max(10, imgHeight),
               });
             } else {
-              page.drawText(field.value, {
+              const displayValue = field.type === 'checkbox' && field.value
+                ? `☑ ${field.value}`
+                : field.type === 'dropdown' && field.value
+                  ? `▼ ${field.value}`
+                  : field.value;
+              page.drawText(displayValue, {
                 x: Math.max(0, pdfX + 4),
                 y: Math.max(0, pdfY + fontSize * 0.3),
                 size: fontSize,

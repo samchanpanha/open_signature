@@ -35,6 +35,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(body.height !== undefined ? { height: body.height } : {}),
         ...(body.label !== undefined ? { label: body.label || null } : {}),
         ...(body.required !== undefined ? { required: body.required } : {}),
+        ...(body.options !== undefined ? { options: body.options ? JSON.stringify(body.options) : null } : {}),
       },
     });
 
@@ -43,6 +44,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       type: updated.type,
       label: updated.label,
       required: updated.required,
+      options: updated.options ? JSON.parse(updated.options) : null,
       pageNumber: updated.pageNumber,
       x: updated.x,
       y: updated.y,

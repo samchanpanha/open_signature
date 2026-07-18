@@ -8,7 +8,7 @@ import {
   AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon,
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
-  GripVertical, UserCog, Crown, ArrowRight
+  GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,8 +19,9 @@ import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
+import OnboardingTour from '@/components/onboarding-tour';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, bulkSendApi, passwordApi, downloadLinkApi, analyticsApi, brandingApi, profileApi, onboardingApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -31,7 +32,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // ============ TYPES ============
 interface PlacedField {
   id: string;
-  type: 'signature' | 'date' | 'text';
+  type: 'signature' | 'date' | 'text' | 'dropdown' | 'checkbox';
   pageNumber: number;
   x: number;
   y: number;
@@ -43,6 +44,7 @@ interface PlacedField {
   value?: string | null;
   label?: string | null;
   required?: boolean;
+  options?: string[];
 }
 
 interface TempSigner {
@@ -84,6 +86,8 @@ const FIELD_DEFAULTS = {
   signature: { width: 200, height: 60 },
   date: { width: 150, height: 40 },
   text: { width: 200, height: 40 },
+  dropdown: { width: 180, height: 36 },
+  checkbox: { width: 30, height: 30 },
 };
 
 const STATUS_TABS = ['All', 'Draft', 'Sent', 'Signing', 'Completed', 'Rejected', 'Expired'] as const;
@@ -97,6 +101,7 @@ function StatusBadge({ status }: { status: string }) {
     Completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
     Rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
     Expired: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+    Revoked: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
   };
   return <Badge className={variants[status] || ''}>{status}</Badge>;
 }
@@ -351,6 +356,7 @@ export default function Home() {
   const [editFieldWidth, setEditFieldWidth] = useState(200);
   const [editFieldHeight, setEditFieldHeight] = useState(40);
   const [editFieldSignerId, setEditFieldSignerId] = useState<string | null>(null);
+  const [editFieldOptions, setEditFieldOptions] = useState('');
   const [savingField, setSavingField] = useState(false);
 
   // Refs
@@ -614,6 +620,14 @@ export default function Home() {
     }
   }, []);
 
+  const loadFolders = useCallback(async () => {
+    if (!store.currentOrgId) { setFolders([]); return; }
+    try {
+      const list = await foldersApi.list(store.currentOrgId);
+      setFolders(list);
+    } catch { /* ok */ }
+  }, [store.currentOrgId]);
+
   useEffect(() => {
     if (store.currentView === 'dashboard' && store.user) {
       loadDocuments();
@@ -719,7 +733,7 @@ export default function Home() {
       setEditorDoc(doc);
       setPlacedFields(doc.fields.map((f) => ({
         id: f.id,
-        type: f.type as 'signature' | 'date' | 'text',
+        type: f.type as 'signature' | 'date' | 'text' | 'dropdown' | 'checkbox',
         pageNumber: f.pageNumber,
         x: f.x,
         y: f.y,
@@ -729,6 +743,7 @@ export default function Home() {
         value: f.value,
         label: f.label,
         required: f.required,
+        options: f.options || undefined,
       })));
       setLoadTemplateDialog(false);
       toast.success(`Template "${template.name}" applied`);
@@ -747,7 +762,7 @@ export default function Home() {
       setEditorDoc(doc);
       setPlacedFields(doc.fields.map((f) => ({
         id: f.id,
-        type: f.type as 'signature' | 'date' | 'text',
+        type: f.type as 'signature' | 'date' | 'text' | 'dropdown' | 'checkbox',
         pageNumber: f.pageNumber,
         x: f.x,
         y: f.y,
@@ -757,6 +772,7 @@ export default function Home() {
         value: f.value,
         label: f.label,
         required: f.required,
+        options: f.options || undefined,
       })));
 
       // Load available workflows for current org
@@ -973,6 +989,7 @@ export default function Home() {
           setEditFieldWidth(Math.round(field.width));
           setEditFieldHeight(Math.round(field.height));
           setEditFieldSignerId(field.signerId || null);
+          setEditFieldOptions(field.options ? field.options.join('\n') : '');
         }
       }
 
@@ -995,12 +1012,16 @@ export default function Home() {
     if (!selectedFieldId) return;
     setSavingField(true);
     try {
+      const parsedOptions = editFieldOptions.trim()
+        ? editFieldOptions.split('\n').map(o => o.trim()).filter(Boolean)
+        : null;
       await fieldsApi.update(selectedFieldId, {
         label: editFieldLabel || null,
         required: editFieldRequired,
         width: editFieldWidth,
         height: editFieldHeight,
         signerId: editFieldSignerId,
+        options: parsedOptions,
       });
       setPlacedFields(prev => prev.map(f => {
         if (f.id !== selectedFieldId) return f;
@@ -1014,6 +1035,7 @@ export default function Home() {
           signerId: editFieldSignerId || undefined,
           signerName: signer?.name || undefined,
           signerColor: signer?.color || undefined,
+          options: parsedOptions || undefined,
         };
       }));
       toast.success('Field updated');
@@ -1179,6 +1201,18 @@ export default function Home() {
     }
   };
 
+  const handleGenerateDownloadLink = async (type: 'signed_pdf' | 'certificate') => {
+    if (!store.viewingDocumentId) return;
+    try {
+      const result = await downloadLinkApi.create(store.viewingDocumentId, type);
+      const fullUrl = `${window.location.origin}${result.url}`;
+      await navigator.clipboard.writeText(fullUrl);
+      toast.success(`Download link copied! Expires: ${new Date(result.expiresAt).toLocaleTimeString()}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate link');
+    }
+  };
+
   // ============ SIGNING (GUEST) ============
   const loadSavedSignatures = useCallback(async () => {
     setSavedSigsLoading(true);
@@ -1287,14 +1321,6 @@ export default function Home() {
   }, []);
 
   // Folders loader
-  const loadFolders = useCallback(async () => {
-    if (!store.currentOrgId) { setFolders([]); return; }
-    try {
-      const list = await foldersApi.list(store.currentOrgId);
-      setFolders(list);
-    } catch { /* ok */ }
-  }, [store.currentOrgId]);
-
   // Org settings data loader
   const loadOrgSettingsData = useCallback(async (orgId: string) => {
     try {
@@ -1306,7 +1332,7 @@ export default function Home() {
       setOrgEmailTemplates(et);
     } catch { /* ok */ }
     try {
-      const keys = await apiKeysApi.list();
+      const keys = await apiKeysApi.list(orgId);
       setOrgApiKeys(keys);
     } catch { /* ok */ }
   }, []);
@@ -1504,6 +1530,17 @@ export default function Home() {
                   <Shield className="w-3 h-3 mr-1" /> Verify Identity
                 </Button>
               )}
+              <Button size="sm" variant="outline" onClick={async () => {
+                const reason = prompt('Reason for rejecting this document:');
+                if (reason === null) return;
+                try {
+                  await rejectionApi.reject(store.signingToken!, reason || 'No reason provided');
+                  toast.success('Document rejected');
+                  setStore({ currentView: 'dashboard' });
+                } catch { toast.error('Failed to reject document'); }
+              }} className="text-red-600 border-red-300 hover:bg-red-50">
+                <XCircle className="w-3 h-3 mr-1" /> Reject
+              </Button>
               <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Signing</Badge>
               <ThemeToggle />
             </div>
@@ -1528,7 +1565,7 @@ export default function Home() {
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
             <p className="text-sm text-amber-800 dark:text-amber-300">
-              Please review the document and fill all required fields. Click on a highlighted field to add your {signingInfo.signer.fields.some(f => f.type === 'signature') ? 'signature, ' : ''}date, or text.
+              Please review the document and fill all required fields. Click on a highlighted field to add your {signingInfo.signer.fields.some(f => f.type === 'signature') ? 'signature, ' : ''}date, text, or selections.
             </p>
           </div>
 
@@ -1576,6 +1613,8 @@ export default function Home() {
                             {field.type === 'signature' && <PenLine className="w-3 h-3 text-amber-600" />}
                             {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
                             {field.type === 'text' && <Type className="w-3 h-3 text-amber-600" />}
+                            {field.type === 'dropdown' && <List className="w-3 h-3 text-amber-600" />}
+                            {field.type === 'checkbox' && <CheckSquare className="w-3 h-3 text-amber-600" />}
                             <span className="text-xs text-amber-700 font-medium capitalize">{field.type}</span>
                           </div>
                         )}
@@ -1600,6 +1639,8 @@ export default function Home() {
                     {field.type === 'signature' && <PenLine className="w-4 h-4" />}
                     {field.type === 'date' && <CalendarDays className="w-4 h-4" />}
                     {field.type === 'text' && <Type className="w-4 h-4" />}
+                    {field.type === 'dropdown' && <List className="w-4 h-4" />}
+                    {field.type === 'checkbox' && <CheckSquare className="w-4 h-4" />}
                     {field.type} Field
                   </h3>
                   <Button variant="ghost" size="sm" onClick={() => setActiveSigningField(null)}>
@@ -1675,6 +1716,50 @@ export default function Home() {
                       value={signingFieldValues[field.id] || ''}
                       onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value)}
                     />
+                  </div>
+                )}
+
+                {field.type === 'dropdown' && field.options && field.options.length > 0 && (
+                  <div className="space-y-3">
+                    <select
+                      className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                      value={signingFieldValues[field.id] || ''}
+                      onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value, true)}
+                    >
+                      <option value="">Select an option...</option>
+                      {field.options.map((opt: string) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {field.type === 'checkbox' && field.options && field.options.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">Select one or more options:</p>
+                    {field.options.map((opt: string) => {
+                      const currentValues = signingFieldValues[field.id] ? signingFieldValues[field.id].split(',').map((v: string) => v.trim()) : [];
+                      const isChecked = currentValues.includes(opt);
+                      return (
+                        <label key={opt} className="flex items-center gap-3 p-2 rounded-md border cursor-pointer hover:bg-muted/50">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              let newValues: string[];
+                              if (isChecked) {
+                                newValues = currentValues.filter((v: string) => v !== opt);
+                              } else {
+                                newValues = [...currentValues, opt];
+                              }
+                              handleSigningFieldUpdate(field.id, newValues.join(', '), true);
+                            }}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <span className="text-sm">{opt}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1822,6 +1907,7 @@ export default function Home() {
   if (store.currentView === 'dashboard') {
     return (
       <div className="min-h-screen flex flex-col bg-background">
+        <OnboardingTour />
         <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1980,8 +2066,26 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => { if (currentOrgId) { setNewFolderName(''); setCreatingFolder(true); } }} disabled={!currentOrgId} title="Create folder">
+              <Button variant="outline" size="sm" onClick={() => { if (store.currentOrgId) { setNewFolderName(''); setCreatingFolder(true); } }} disabled={!store.currentOrgId} title="Create folder">
                 <FileText className="w-4 h-4 mr-1" /> Folder
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {
+                const draftDocs = documents.filter((d: any) => d.status === 'Draft');
+                if (draftDocs.length === 0) { toast.error('No draft documents available for bulk send'); return; }
+                const docId = prompt('Enter draft document ID to bulk send:');
+                if (!docId) return;
+                const emails = prompt('Enter recipient emails (comma-separated):\nFormat: email1,name1;email2,name2');
+                if (!emails) return;
+                const recipients = emails.split(';').map((e: string) => {
+                  const [email, name] = e.split(',').map((s: string) => s.trim());
+                  return { email, name: name || email };
+                });
+                bulkSendApi.send(docId, recipients).then((r: any) => {
+                  toast.success(`Bulk sent to ${r.totalSent} recipients`);
+                  loadDocuments();
+                }).catch(() => toast.error('Bulk send failed'));
+              }}>
+                <CopyPlus className="w-4 h-4 mr-1" /> Bulk Send
               </Button>
               <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
                 <Plus className="w-4 h-4 mr-2" /> New Document
@@ -2001,7 +2105,7 @@ export default function Home() {
           </div>
 
           {/* Folder Navigation */}
-          {currentOrgId && folders.length > 0 && (
+          {store.currentOrgId && folders.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 className={`text-xs px-2 py-1 rounded ${!currentFolderId ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 font-medium' : 'text-muted-foreground hover:bg-muted'}`}
@@ -2488,6 +2592,8 @@ export default function Home() {
                 { type: 'signature' as const, icon: PenLine, label: 'Signature', color: 'emerald' },
                 { type: 'date' as const, icon: CalendarDays, label: 'Date', color: 'amber' },
                 { type: 'text' as const, icon: Type, label: 'Text', color: 'neutral' },
+                { type: 'dropdown' as const, icon: List, label: 'Dropdown', color: 'blue' },
+                { type: 'checkbox' as const, icon: CheckSquare, label: 'Checkbox', color: 'purple' },
               ]).map(tool => (
                 <Button
                   key={tool.type}
@@ -2625,6 +2731,8 @@ export default function Home() {
                 { type: 'signature' as const, icon: PenLine, label: 'Sig' },
                 { type: 'date' as const, icon: CalendarDays, label: 'Date' },
                 { type: 'text' as const, icon: Type, label: 'Text' },
+                { type: 'dropdown' as const, icon: List, label: 'Drop' },
+                { type: 'checkbox' as const, icon: CheckSquare, label: 'Check' },
               ].map(tool => (
                 <Button
                   key={tool.type}
@@ -2670,6 +2778,8 @@ export default function Home() {
                           } ${
                             field.type === 'signature' ? 'border-emerald-400 bg-emerald-50/70' :
                             field.type === 'date' ? 'border-amber-400 bg-amber-50/70' :
+                            field.type === 'dropdown' ? 'border-blue-400 bg-blue-50/70' :
+                            field.type === 'checkbox' ? 'border-purple-400 bg-purple-50/70' :
                             'border-neutral-400 bg-neutral-50/70'
                           } ${field.signerColor ? 'ring-2' : ''} ${draggingField === field.id ? 'opacity-80 shadow-lg z-20' : ''}`}
                           style={{
@@ -2687,6 +2797,8 @@ export default function Home() {
                             {field.type === 'signature' && <PenLine className="w-3 h-3 text-emerald-600" />}
                             {field.type === 'date' && <CalendarDays className="w-3 h-3 text-amber-600" />}
                             {field.type === 'text' && <Type className="w-3 h-3 text-neutral-600" />}
+                            {field.type === 'dropdown' && <List className="w-3 h-3 text-blue-600" />}
+                            {field.type === 'checkbox' && <CheckSquare className="w-3 h-3 text-purple-600" />}
                             <span className="text-[10px] font-medium truncate">
                               {field.label || field.signerName || field.type}
                             </span>
@@ -2808,11 +2920,15 @@ export default function Home() {
                   <Badge className={
                     selectedFieldForEdit.type === 'signature' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
                     selectedFieldForEdit.type === 'date' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                    selectedFieldForEdit.type === 'dropdown' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                    selectedFieldForEdit.type === 'checkbox' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400' :
                     'bg-secondary text-secondary-foreground'
                   }>
                     {selectedFieldForEdit.type === 'signature' && <PenLine className="w-3 h-3 mr-1" />}
                     {selectedFieldForEdit.type === 'date' && <CalendarDays className="w-3 h-3 mr-1" />}
                     {selectedFieldForEdit.type === 'text' && <Type className="w-3 h-3 mr-1" />}
+                    {selectedFieldForEdit.type === 'dropdown' && <List className="w-3 h-3 mr-1" />}
+                    {selectedFieldForEdit.type === 'checkbox' && <CheckSquare className="w-3 h-3 mr-1" />}
                     {selectedFieldForEdit.type.charAt(0).toUpperCase() + selectedFieldForEdit.type.slice(1)}
                   </Badge>
                 </div>
@@ -2826,6 +2942,24 @@ export default function Home() {
                     onChange={(e) => setEditFieldLabel(e.target.value)}
                   />
                 </div>
+
+                {/* Options editor for dropdown/checkbox */}
+                {(selectedFieldForEdit.type === 'dropdown' || selectedFieldForEdit.type === 'checkbox') && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      {selectedFieldForEdit.type === 'dropdown' ? 'Dropdown Options' : 'Checkbox Options'}
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedFieldForEdit.type === 'dropdown' ? 'Enter options one per line (signers will select one)' : 'Enter options one per line (signers will check/uncheck)'}
+                    </p>
+                    <textarea
+                      className="w-full border rounded-md px-3 py-2 text-sm bg-background min-h-[80px]"
+                      placeholder={"Option 1\nOption 2\nOption 3"}
+                      value={editFieldOptions}
+                      onChange={(e) => setEditFieldOptions(e.target.value)}
+                    />
+                  </div>
+                )}
 
                 {/* Required toggle */}
                 <div className="flex items-center justify-between">
@@ -3015,10 +3149,26 @@ export default function Home() {
                   <Button size="sm" variant="outline" onClick={handleDownloadCertificate} className="hidden sm:flex">
                     <Award className="w-4 h-4 mr-1" /> Certificate
                   </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleGenerateDownloadLink('signed_pdf')} title="Generate expiring download link">
+                    <CopyPlus className="w-4 h-4 mr-1" /> Share Link
+                  </Button>
                   <Button size="sm" onClick={handleDownload} className="bg-emerald-600 hover:bg-emerald-700">
                     <Download className="w-4 h-4 mr-1" /> Download
                   </Button>
                 </>
+              )}
+              {(viewerDoc.status === 'Sent' || viewerDoc.status === 'Signing') && (
+                <Button size="sm" variant="destructive" onClick={async () => {
+                  const reason = prompt('Reason for revoking this document:');
+                  if (reason === null) return;
+                  try {
+                    await revokeApi.revoke(viewerDoc.id, reason || 'Revoked by owner');
+                    toast.success('Document revoked');
+                    setStore({ currentView: 'dashboard', viewingDocumentId: null });
+                  } catch { toast.error('Failed to revoke document'); }
+                }}>
+                  <Ban className="w-4 h-4 mr-1" /> Revoke
+                </Button>
               )}
               <ThemeToggle />
             </div>
@@ -3207,6 +3357,18 @@ export default function Home() {
                         >
                           {field.value && field.type === 'signature' && field.value.startsWith('data:') ? (
                             <img src={field.value} alt="Signature" className="h-full object-contain" />
+                          ) : field.type === 'checkbox' && field.value ? (
+                            <div className="flex flex-wrap gap-1 p-0.5">
+                              {field.value.split(',').map((v: string) => (
+                                <span key={v} className="inline-flex items-center gap-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 text-[10px] px-1.5 py-0.5 rounded">
+                                  <CheckSquare className="w-2.5 h-2.5" /> {v.trim()}
+                                </span>
+                              ))}
+                            </div>
+                          ) : field.type === 'dropdown' && field.value ? (
+                            <span className="text-xs font-medium truncate flex items-center gap-1">
+                              <List className="w-3 h-3 text-blue-600 shrink-0" /> {field.value}
+                            </span>
                           ) : field.value ? (
                             <span className="text-xs font-medium truncate">{field.value}</span>
                           ) : (

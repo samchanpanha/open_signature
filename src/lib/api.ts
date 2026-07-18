@@ -139,6 +139,7 @@ export interface DocumentDetail extends DocumentListItem {
     height: number;
     value: string | null;
     signerId: string | null;
+    options?: string[] | null;
   }[];
 }
 
@@ -159,6 +160,7 @@ export interface SignerInfo {
     width: number;
     height: number;
     value: string | null;
+    options?: string[] | null;
   }[];
 }
 
@@ -351,7 +353,7 @@ export interface Contact {
 }
 
 export const contactsApi = {
-  list: () => request<Contact[]>('/api/contacts'),
+  list: () => request<{ contacts: Contact[] }>('/api/contacts').then(d => d.contacts),
   create: (data: { name: string; email: string; phone?: string; company?: string }) =>
     request<Contact>('/api/contacts', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: { name?: string; email?: string; phone?: string; company?: string }) =>
@@ -368,7 +370,7 @@ export interface Folder {
 }
 
 export const foldersApi = {
-  list: (orgId: string) => request<Folder[]>(`/api/folders?orgId=${orgId}`),
+  list: (orgId: string) => request<{ folders: Folder[] }>(`/api/folders?orgId=${orgId}`).then(d => d.folders),
   create: (data: { name: string; parentId?: string; orgId: string }) =>
     request<Folder>('/api/folders', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: { name: string }) =>
@@ -386,7 +388,7 @@ export interface Webhook {
 }
 
 export const webhooksApi = {
-  list: (orgId: string) => request<Webhook[]>(`/api/webhooks?orgId=${orgId}`),
+  list: (orgId: string) => request<{ webhooks: Webhook[] }>(`/api/webhooks?orgId=${orgId}`).then(d => d.webhooks),
   create: (data: { url: string; events: string[]; orgId: string }) =>
     request<Webhook>('/api/webhooks', { method: 'POST', body: JSON.stringify({ ...data, events: JSON.stringify(data.events) }) }),
   update: (id: string, data: { url?: string; events?: string[]; isActive?: boolean }) =>
@@ -429,7 +431,7 @@ export interface EmailTemplate {
 }
 
 export const emailTemplatesApi = {
-  list: (orgId: string) => request<EmailTemplate[]>(`/api/email-templates?orgId=${orgId}`),
+  list: (orgId: string) => request<{ templates: EmailTemplate[] }>(`/api/email-templates?orgId=${orgId}`).then(d => d.templates),
   get: (id: string) => request<EmailTemplate>(`/api/email-templates/${id}`),
   create: (data: { name: string; subject: string; htmlBody: string; orgId: string }) =>
     request<EmailTemplate>('/api/email-templates', { method: 'POST', body: JSON.stringify(data) }),
@@ -453,7 +455,7 @@ export interface ApiKey {
 }
 
 export const apiKeysApi = {
-  list: () => request<ApiKey[]>('/api/api-keys'),
+  list: (orgId: string) => request<{ apiKeys: ApiKey[] }>(`/api/api-keys?orgId=${orgId}`).then(d => d.apiKeys),
   create: (data: { name: string; permissions: string[]; orgId: string; expiresAt?: string }) =>
     request<ApiKey & { key: string }>('/api/api-keys', {
       method: 'POST',
@@ -483,4 +485,82 @@ export const remindersApi = {
 // Expire check
 export const expireApi = {
   check: () => request<{ expiredCount: number }>('/api/documents/expire'),
+};
+
+// Document Rejection
+export const rejectionApi = {
+  reject: (token: string, reason?: string) =>
+    request(`/api/sign/${token}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+};
+
+// Document Revoke
+export const revokeApi = {
+  revoke: (documentId: string, reason?: string) =>
+    request(`/api/documents/${documentId}/revoke`, { method: 'POST', body: JSON.stringify({ reason }) }),
+};
+
+// Bulk Send
+export interface BulkRecipient {
+  email: string;
+  name?: string;
+  role?: string;
+}
+export const bulkSendApi = {
+  send: (documentId: string, recipients: BulkRecipient[], expiresInDays?: number) =>
+    request<{ totalSent: number; results: any[] }>('/api/documents/bulk-send', {
+      method: 'POST',
+      body: JSON.stringify({ documentId, recipients, expiresInDays }),
+    }),
+};
+
+// Password Protection
+export const passwordApi = {
+  getStatus: (documentId: string) =>
+    request<{ hasPassword: boolean }>(`/api/documents/${documentId}/password`),
+  set: (documentId: string, password: string) =>
+    request(`/api/documents/${documentId}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  remove: (documentId: string) =>
+    request(`/api/documents/${documentId}/password`, { method: 'DELETE' }),
+};
+
+// Download Links (with expiry)
+export const downloadLinkApi = {
+  create: (documentId: string, type: 'signed_pdf' | 'certificate') =>
+    request<{ url: string; expiresAt: string }>(`/api/documents/${documentId}/download-link`, {
+      method: 'POST', body: JSON.stringify({ type }),
+    }),
+};
+
+// Analytics
+export const analyticsApi = {
+  get: () => request<any>('/api/analytics'),
+};
+
+// Branding / White-label
+export const brandingApi = {
+  get: () => request<any>('/api/branding'),
+  update: (data: { logoUrl?: string; brandColor?: string; customDomain?: string; name?: string }) =>
+    request('/api/branding', { method: 'PUT', body: JSON.stringify(data) }),
+};
+
+// User Profile
+export const profileApi = {
+  get: () => request<any>('/api/auth/profile'),
+  update: (data: { name?: string; company?: string; jobTitle?: string; phone?: string; avatarUrl?: string }) =>
+    request<any>('/api/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
+};
+
+// Template Offline Signing
+export const offlineSignApi = {
+  get: (templateId: string) =>
+    request<{ allowOfflineSign: boolean }>(`/api/templates/${templateId}/offline`),
+  toggle: (templateId: string, allowOfflineSign: boolean) =>
+    request(`/api/templates/${templateId}/offline`, { method: 'PUT', body: JSON.stringify({ allowOfflineSign }) }),
+};
+
+// Onboarding
+export const onboardingApi = {
+  getStatus: () => request<{ steps: string[]; totalSteps: number; isComplete: boolean }>('/api/onboarding'),
+  completeStep: (step: string) =>
+    request<{ completedSteps: string[] }>('/api/onboarding', { method: 'POST', body: JSON.stringify({ step }) }),
 };
