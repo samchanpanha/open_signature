@@ -8,7 +8,7 @@ import {
   AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon,
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
-  GripVertical, UserCog, Crown
+  GripVertical, UserCog, Crown, ArrowRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -336,6 +336,10 @@ export default function Home() {
   const [saveTemplateName, setSaveTemplateName] = useState('');
   const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
 
+  // Workflows
+  const [availableWorkflows, setAvailableWorkflows] = useState<import('@/lib/api').WorkflowListItem[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
+
   // Drag-to-move
   const [draggingField, setDraggingField] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState<{ mouseX: number; mouseY: number; fieldX: number; fieldY: number; pageRect: DOMRect } | null>(null);
@@ -362,6 +366,10 @@ export default function Home() {
   const [viewerPdfLoading, setViewerPdfLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
   const [showAudit, setShowAudit] = useState(false);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [showReminders, setShowReminders] = useState(false);
+  const [newReminderDate, setNewReminderDate] = useState('');
+  const [newReminderMsg, setNewReminderMsg] = useState('');
 
   // Signing
   const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } } | null>(null);
@@ -376,6 +384,28 @@ export default function Home() {
   const [rejecting, setRejecting] = useState(false);
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
   const [savedSigsLoading, setSavedSigsLoading] = useState(false);
+
+  // OTP Verification
+  const [otpStep, setOtpStep] = useState(false);
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpVerifying, setOtpVerifying] = useState(false);
+
+  // Contacts
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [showContactsPicker, setShowContactsPicker] = useState(false);
+
+  // Folders
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+
+  // Org Settings Tabs
+  const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates'>('members');
+  const [orgWebhooks, setOrgWebhooks] = useState<Webhook[]>([]);
+  const [orgEmailTemplates, setOrgEmailTemplates] = useState<EmailTemplate[]>([]);
+  const [orgApiKeys, setOrgApiKeys] = useState<ApiKey[]>([]);
 
   // Keep placedFields ref in sync
   useEffect(() => {
@@ -457,6 +487,19 @@ export default function Home() {
       toast.error(err.message || 'Failed to create organization');
     } finally {
       setCreatingOrg(false);
+    }
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim() || !store.currentOrgId) return;
+    try {
+      await foldersApi.create({ name: newFolderName.trim(), orgId: store.currentOrgId });
+      toast.success('Folder created');
+      setCreatingFolder(false);
+      setNewFolderName('');
+      loadFolders();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create folder');
     }
   };
 
@@ -575,9 +618,10 @@ export default function Home() {
     if (store.currentView === 'dashboard' && store.user) {
       loadDocuments();
       loadTemplates();
+      loadFolders();
       loadOrgs();
     }
-  }, [store.currentView, store.user, loadDocuments, loadTemplates, loadOrgs]);
+  }, [store.currentView, store.user, loadDocuments, loadTemplates, loadOrgs, loadFolders]);
 
   // Reload documents when org changes
   useEffect(() => {
@@ -714,6 +758,16 @@ export default function Home() {
         label: f.label,
         required: f.required,
       })));
+
+      // Load available workflows for current org
+      if (store.currentOrgId) {
+        try {
+          const wfs = await workflowsApi.list(store.currentOrgId);
+          setAvailableWorkflows(wfs.filter(w => w.isActive));
+        } catch {
+          setAvailableWorkflows([]);
+        }
+      }
 
       // Render PDF pages
       const token = localStorage.getItem('token');
@@ -997,6 +1051,7 @@ export default function Home() {
         fieldAssignments,
         ccRecipients.length > 0 ? ccRecipients : undefined,
         expiryDate || undefined,
+        selectedWorkflowId || undefined,
       );
       toast.success('Document sent for signing!');
       store.setView('dashboard');
@@ -1075,6 +1130,12 @@ export default function Home() {
       // Load audit logs
       const logs = await documentsApi.audit(store.viewingDocumentId);
       setAuditLogs(logs);
+
+      // Load reminders
+      try {
+        const rems = await remindersApi.list(store.viewingDocumentId);
+        setReminders(rems as any);
+      } catch { setReminders([]); }
     } catch (err) {
       toast.error('Failed to load document');
       console.error(err);
@@ -1140,13 +1201,18 @@ export default function Home() {
         const info = await signingApi.getInfo(store.signingToken!);
         setSigningInfo(info);
 
-        // Initialize field values and persist dates to server
+        // Initialize field values and persist to server
         const vals: Record<string, string> = {};
         for (const f of info.signer.fields) {
-          const val = f.type === 'date' ? new Date().toLocaleDateString() : (f.value || '');
-          vals[f.id] = val;
-          if (val) {
-            signingApi.updateField(store.signingToken!, f.id, val).catch(() => {});
+          if (f.value) {
+            vals[f.id] = f.value;
+          } else if (f.type === 'date') {
+            vals[f.id] = new Date().toISOString().split('T')[0];
+          } else {
+            vals[f.id] = '';
+          }
+          if (vals[f.id]) {
+            signingApi.updateField(store.signingToken!, f.id, vals[f.id]).catch(() => {});
           }
         }
         setSigningFieldValues(vals);
@@ -1181,13 +1247,96 @@ export default function Home() {
     })();
   }, [store.signingToken, loadSavedSignatures]);
 
-  const handleSigningFieldUpdate = async (fieldId: string, value: string) => {
+  const textUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // OTP handlers
+  const handleRequestOtp = async () => {
+    if (!store.signingToken) return;
+    try {
+      await otpApi.requestOtp(store.signingToken);
+      setOtpRequested(true);
+      toast.success('OTP code sent to your email');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send OTP');
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!store.signingToken || otpCode.length !== 6) return;
+    setOtpVerifying(true);
+    try {
+      await otpApi.verifyOtp(store.signingToken, otpCode);
+      setOtpStep(false);
+      toast.success('Identity verified');
+      // Reload signing info
+      const info = await signingApi.getInfo(store.signingToken!);
+      setSigningInfo(info);
+    } catch (err: any) {
+      toast.error(err.message || 'Invalid OTP code');
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  // Contacts loader
+  const loadContacts = useCallback(async () => {
+    try {
+      const list = await contactsApi.list();
+      setContacts(list);
+    } catch { /* ok */ }
+  }, []);
+
+  // Folders loader
+  const loadFolders = useCallback(async () => {
+    if (!store.currentOrgId) { setFolders([]); return; }
+    try {
+      const list = await foldersApi.list(store.currentOrgId);
+      setFolders(list);
+    } catch { /* ok */ }
+  }, [store.currentOrgId]);
+
+  // Org settings data loader
+  const loadOrgSettingsData = useCallback(async (orgId: string) => {
+    try {
+      const [wh, et] = await Promise.all([
+        webhooksApi.list(orgId),
+        emailTemplatesApi.list(orgId),
+      ]);
+      setOrgWebhooks(wh);
+      setOrgEmailTemplates(et);
+    } catch { /* ok */ }
+    try {
+      const keys = await apiKeysApi.list();
+      setOrgApiKeys(keys);
+    } catch { /* ok */ }
+  }, []);
+
+  useEffect(() => {
+    if (store.orgSettingsOpen && store.orgSettingsOrgId) {
+      loadOrgSettingsData(store.orgSettingsOrgId);
+    }
+  }, [store.orgSettingsOpen, store.orgSettingsOrgId, loadOrgSettingsData]);
+
+  const handleSigningFieldUpdate = async (fieldId: string, value: string, immediate = false) => {
     if (!store.signingToken) return;
     setSigningFieldValues(prev => ({ ...prev, [fieldId]: value }));
-    try {
-      await signingApi.updateField(store.signingToken, fieldId, value);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to save field');
+
+    if (immediate || fieldId !== activeSigningField) {
+      if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
+      try {
+        await signingApi.updateField(store.signingToken, fieldId, value);
+      } catch (err: any) {
+        toast.error(err.message || 'Failed to save field');
+      }
+    } else {
+      if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
+      textUpdateTimerRef.current = setTimeout(async () => {
+        try {
+          await signingApi.updateField(store.signingToken!, fieldId, value);
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to save field');
+        }
+      }, 300);
     }
   };
 
@@ -1253,6 +1402,61 @@ export default function Home() {
       );
     }
 
+    if (signingInfo) {
+      // Check if OTP verification is needed (signer hasn't verified yet)
+      if (otpStep) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-background p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="max-w-md w-full">
+              <Card>
+                <CardContent className="pt-6 space-y-4">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Shield className="w-8 h-8 text-emerald-600" />
+                    </div>
+                    <h2 className="text-lg font-semibold">Verify Your Identity</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      A one-time code has been sent to <span className="font-medium">{signingInfo.signer.email}</span>
+                    </p>
+                  </div>
+                  {!otpRequested ? (
+                    <Button onClick={handleRequestOtp} className="w-full bg-emerald-600 hover:bg-emerald-700">
+                      <Send className="w-4 h-4 mr-2" /> Send Verification Code
+                    </Button>
+                  ) : (
+                    <div className="space-y-3">
+                      <Input
+                        placeholder="Enter 6-digit code"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        className="text-center text-lg tracking-[0.3em] font-mono"
+                        maxLength={6}
+                        onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
+                      />
+                      <Button
+                        onClick={handleVerifyOtp}
+                        disabled={otpCode.length !== 6 || otpVerifying}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        {otpVerifying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                        Verify
+                      </Button>
+                      <Button variant="ghost" size="sm" className="w-full" onClick={() => { setOtpRequested(false); setOtpCode(''); }}>
+                        Resend Code
+                      </Button>
+                    </div>
+                  )}
+                  <Button variant="ghost" size="sm" className="w-full" onClick={() => setOtpStep(false)}>
+                    Skip for now
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        );
+      }
+    }
+
     if (signingComplete) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -1295,6 +1499,11 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {!signingInfo.signer.otpVerified && (
+                <Button size="sm" variant="outline" onClick={() => setOtpStep(true)} className="text-emerald-600 border-emerald-300">
+                  <Shield className="w-3 h-3 mr-1" /> Verify Identity
+                </Button>
+              )}
               <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Signing</Badge>
               <ThemeToggle />
             </div>
@@ -1409,15 +1618,15 @@ export default function Home() {
                     <TabsContent value="draw" className="mt-3">
                       <SignatureCanvas
                         onSave={(dataUrl) => {
-                          handleSigningFieldUpdate(field.id, dataUrl);
+                          handleSigningFieldUpdate(field.id, dataUrl, true);
                         }}
                       />
                     </TabsContent>
                     <TabsContent value="type" className="mt-3">
-                      <TypeSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+                      <TypeSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl, true)} />
                     </TabsContent>
                     <TabsContent value="upload" className="mt-3">
-                      <UploadSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl)} />
+                      <UploadSignature onSave={(dataUrl) => handleSigningFieldUpdate(field.id, dataUrl, true)} />
                     </TabsContent>
                     <TabsContent value="saved" className="mt-3">
                       {savedSigsLoading ? (
@@ -1434,7 +1643,7 @@ export default function Home() {
                             <button
                               key={sig.id}
                               className="border rounded-lg p-2 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 transition-colors text-left group"
-                              onClick={() => handleSigningFieldUpdate(field.id, sig.dataUrl)}
+                              onClick={() => handleSigningFieldUpdate(field.id, sig.dataUrl, true)}
                             >
                               <img src={sig.dataUrl} alt={sig.name} className="h-12 w-full object-contain mb-1" />
                               <p className="text-xs font-medium truncate">{sig.name}</p>
@@ -1451,9 +1660,9 @@ export default function Home() {
                     <Input
                       type="date"
                       value={signingFieldValues[field.id] || ''}
-                      onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value)}
+                      onChange={(e) => handleSigningFieldUpdate(field.id, e.target.value, true)}
                     />
-                    <Button size="sm" onClick={() => handleSigningFieldUpdate(field.id, new Date().toLocaleDateString())} variant="outline" className="w-full">
+                    <Button size="sm" onClick={() => handleSigningFieldUpdate(field.id, new Date().toISOString().split('T')[0], true)} variant="outline" className="w-full">
                       <CalendarDays className="w-4 h-4 mr-1" /> Use Today&apos;s Date
                     </Button>
                   </div>
@@ -1468,6 +1677,19 @@ export default function Home() {
                     />
                   </div>
                 )}
+
+                <Button
+                  className="w-full mt-3 bg-emerald-600 hover:bg-emerald-700"
+                  onClick={async () => {
+                    if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
+                    if (store.signingToken && signingFieldValues[field.id]) {
+                      await signingApi.updateField(store.signingToken, field.id, signingFieldValues[field.id]);
+                    }
+                    setActiveSigningField(null);
+                  }}
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1" /> Done
+                </Button>
               </div>
             </div>
           );
@@ -1757,9 +1979,14 @@ export default function Home() {
                 {currentOrg ? `Documents in ${currentOrg.name}` : 'Manage and send documents for signing'}
               </p>
             </div>
-            <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="w-4 h-4 mr-2" /> New Document
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => { if (currentOrgId) { setNewFolderName(''); setCreatingFolder(true); } }} disabled={!currentOrgId} title="Create folder">
+                <FileText className="w-4 h-4 mr-1" /> Folder
+              </Button>
+              <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="w-4 h-4 mr-2" /> New Document
+              </Button>
+            </div>
           </div>
 
           {/* Search Bar */}
@@ -1772,6 +1999,27 @@ export default function Home() {
               className="pl-10"
             />
           </div>
+
+          {/* Folder Navigation */}
+          {currentOrgId && folders.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                className={`text-xs px-2 py-1 rounded ${!currentFolderId ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                onClick={() => setCurrentFolderId(null)}
+              >
+                All
+              </button>
+              {folders.map(f => (
+                <button
+                  key={f.id}
+                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${currentFolderId === f.id ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={() => setCurrentFolderId(f.id)}
+                >
+                  <FileText className="w-3 h-3" /> {f.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Status Filter Tabs */}
           <div className="flex gap-1 overflow-x-auto pb-1">
@@ -1842,6 +2090,15 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
+                          {doc.expiresAt && (doc.status === 'Sent' || doc.status === 'Signing') && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-600">
+                              <Clock className="w-2.5 h-2.5 mr-0.5" />
+                              {(() => {
+                                const days = Math.ceil((new Date(doc.expiresAt).getTime() - Date.now()) / 86400000);
+                                return days <= 0 ? 'Expired' : `${days}d left`;
+                              })()}
+                            </Badge>
+                          )}
                           <StatusBadge status={doc.status} />
                         </div>
                       </div>
@@ -1957,6 +2214,33 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
+        {/* Create Folder Dialog */}
+        <Dialog open={creatingFolder} onOpenChange={setCreatingFolder}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-600" /> New Folder
+              </DialogTitle>
+            </DialogHeader>
+            <Input
+              placeholder="Folder name"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreatingFolder(false)}>Cancel</Button>
+              <Button
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Plus className="w-4 h-4 mr-1" /> Create
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Org Settings Dialog */}
         <Dialog open={store.orgSettingsOpen} onOpenChange={(open) => { if (!open) store.closeOrgSettings(); }}>
           <DialogContent className="max-w-lg">
@@ -1971,9 +2255,9 @@ export default function Home() {
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
             ) : orgDetail ? (
-              <div className="space-y-6 max-h-[60vh] overflow-y-auto">
-                {/* Org info */}
-                <div className="space-y-2">
+              <div className="max-h-[60vh] overflow-y-auto">
+                {/* Org info header */}
+                <div className="space-y-2 mb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
                       <Building2 className="w-6 h-6 text-emerald-600" />
@@ -1989,146 +2273,157 @@ export default function Home() {
                   </div>
                 </div>
 
-                <Separator />
+                {/* Settings Tabs */}
+                <Tabs value={orgSettingsTab} onValueChange={(v) => setOrgSettingsTab(v as any)}>
+                  <TabsList className="grid w-full grid-cols-4 mb-4">
+                    <TabsTrigger value="members" className="text-xs"><Users className="w-3 h-3 mr-1" /> Members</TabsTrigger>
+                    <TabsTrigger value="webhooks" className="text-xs"><Send className="w-3 h-3 mr-1" /> Hooks</TabsTrigger>
+                    <TabsTrigger value="api-keys" className="text-xs"><Shield className="w-3 h-3 mr-1" /> Keys</TabsTrigger>
+                    <TabsTrigger value="email-templates" className="text-xs"><FileText className="w-3 h-3 mr-1" /> Email</TabsTrigger>
+                  </TabsList>
 
-                {/* Members list */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold flex items-center gap-2">
-                    <Users className="w-4 h-4" /> Members
-                  </h4>
-                  <div className="space-y-2">
-                    {orgDetail.members.map(member => {
-                      const isOwner = member.role === 'owner';
-                      const isAdmin = member.role === 'admin';
-                      const canManage = !isOwner && (orgDetail.ownerId === store.user?.id || isAdmin);
-                      return (
-                        <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                          {/* Avatar */}
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{
-                              backgroundColor: isOwner ? 'rgba(5,150,105,0.15)' : 'rgba(100,100,100,0.1)',
-                              color: isOwner ? '#059669' : undefined,
-                            }}
-                          >
-                            {member.user.name.charAt(0).toUpperCase()}
-                          </div>
-                          {/* Info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium truncate">{member.user.name}</p>
-                              {isOwner && <Crown className="w-3.5 h-3.5 text-emerald-600" />}
-                            </div>
-                            <p className="text-xs text-muted-foreground truncate">{member.user.email}</p>
-                          </div>
-                          {/* Role badge */}
-                          <div className="flex items-center gap-2 shrink-0">
-                            <Badge className={
-                              isOwner ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                              isAdmin ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
-                              'bg-secondary text-secondary-foreground'
-                            }>
-                              {member.role}
-                            </Badge>
-                            {canManage && (
-                              <div className="flex items-center gap-1">
-                                <select
-                                  className="text-xs border rounded px-1 py-0.5 bg-background"
-                                  value={member.role}
-                                  onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}
-                                >
-                                  <option value="member">Member</option>
-                                  <option value="admin">Admin</option>
-                                </select>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-destructive hover:text-destructive"
-                                  onClick={() => handleRemoveMember(member.id)}
-                                >
-                                  <X className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground shrink-0">{formatDateOnly(member.joinedAt)}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Invite member */}
-                {(orgDetail.ownerId === store.user?.id || orgDetail.members.some(m => m.user.id === store.user?.id && m.role === 'admin')) && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold flex items-center gap-2">
-                      <UserPlus className="w-4 h-4" /> Invite Member
-                    </h4>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Email address"
-                        type="email"
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        className="flex-1 h-9 text-sm"
-                        onKeyDown={(e) => e.key === 'Enter' && handleInviteMember()}
-                      />
-                      <select
-                        className="border rounded-md px-2 text-xs bg-background h-9"
-                        value={inviteRole}
-                        onChange={(e) => setInviteRole(e.target.value)}
-                      >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                      <Button
-                        size="sm"
-                        onClick={handleInviteMember}
-                        disabled={!inviteEmail.trim() || inviting}
-                        className="bg-emerald-600 hover:bg-emerald-700 h-9"
-                      >
-                        {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Delete org (owner only) */}
-                {orgDetail.ownerId === store.user?.id && (
-                  <>
-                    <Separator />
-                    <div className="space-y-3">
-                      {!deleteOrgConfirm ? (
-                        <Button
-                          variant="outline"
-                          className="w-full text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800"
-                          onClick={() => setDeleteOrgConfirm(true)}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete Organization
-                        </Button>
-                      ) : (
-                        <div className="border border-red-200 dark:border-red-800 rounded-lg p-4 space-y-3">
-                          <p className="text-sm text-red-700 dark:text-red-400 font-medium">
-                            <AlertTriangle className="w-4 h-4 inline mr-1" />
-                            This will permanently delete the organization and all its data. This cannot be undone.
-                          </p>
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setDeleteOrgConfirm(false)} className="flex-1">Cancel</Button>
-                            <Button
-                              size="sm"
-                              className="flex-1 bg-red-600 hover:bg-red-700"
-                              onClick={handleDeleteOrg}
-                              disabled={deletingOrg}
+                  {/* Members Tab */}
+                  <TabsContent value="members" className="space-y-4">
+                    <div className="space-y-2">
+                      {orgDetail.members.map(member => {
+                        const isOwner = member.role === 'owner';
+                        const isAdmin = member.role === 'admin';
+                        const canManage = !isOwner && (orgDetail.ownerId === store.user?.id || isAdmin);
+                        return (
+                          <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                              style={{
+                                backgroundColor: isOwner ? 'rgba(5,150,105,0.15)' : 'rgba(100,100,100,0.1)',
+                                color: isOwner ? '#059669' : undefined,
+                              }}
                             >
-                              {deletingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Trash2 className="w-4 h-4 mr-1" /> Delete</>}
-                            </Button>
+                              {member.user.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium truncate">{member.user.name}</p>
+                                {isOwner && <Crown className="w-3.5 h-3.5 text-emerald-600" />}
+                              </div>
+                              <p className="text-xs text-muted-foreground truncate">{member.user.email}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge className={
+                                isOwner ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                                isAdmin ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                                'bg-secondary text-secondary-foreground'
+                              }>
+                                {member.role}
+                              </Badge>
+                              {canManage && (
+                                <div className="flex items-center gap-1">
+                                  <select className="text-xs border rounded px-1 py-0.5 bg-background" value={member.role} onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}>
+                                    <option value="member">Member</option>
+                                    <option value="admin">Admin</option>
+                                  </select>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveMember(member.id)}>
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })}
                     </div>
-                  </>
-                )}
+                    {/* Invite */}
+                    {(orgDetail.ownerId === store.user?.id || orgDetail.members.some(m => m.user.id === store.user?.id && m.role === 'admin')) && (
+                      <div className="flex gap-2">
+                        <Input placeholder="Email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="flex-1 h-9 text-sm" onKeyDown={(e) => e.key === 'Enter' && handleInviteMember()} />
+                        <select className="border rounded-md px-2 text-xs bg-background h-9" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+                          <option value="member">Member</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <Button size="sm" onClick={handleInviteMember} disabled={!inviteEmail.trim() || inviting} className="bg-emerald-600 hover:bg-emerald-700 h-9">
+                          {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                    )}
+                    {orgDetail.ownerId === store.user?.id && (
+                      <>
+                        <Separator />
+                        {!deleteOrgConfirm ? (
+                          <Button variant="outline" className="w-full text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800" onClick={() => setDeleteOrgConfirm(true)}>
+                            <Trash2 className="w-4 h-4 mr-2" /> Delete Organization
+                          </Button>
+                        ) : (
+                          <div className="border border-red-200 dark:border-red-800 rounded-lg p-4 space-y-3">
+                            <p className="text-sm text-red-700 dark:text-red-400 font-medium"><AlertTriangle className="w-4 h-4 inline mr-1" /> This will permanently delete the organization.</p>
+                            <div className="flex gap-2">
+                              <Button variant="outline" size="sm" onClick={() => setDeleteOrgConfirm(false)} className="flex-1">Cancel</Button>
+                              <Button size="sm" className="flex-1 bg-red-600 hover:bg-red-700" onClick={handleDeleteOrg} disabled={deletingOrg}>
+                                {deletingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Trash2 className="w-4 h-4 mr-1" /> Delete</>}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </TabsContent>
+
+                  {/* Webhooks Tab */}
+                  <TabsContent value="webhooks" className="space-y-4">
+                    {orgWebhooks.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No webhooks configured</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {orgWebhooks.map(wh => (
+                          <div key={wh.id} className="flex items-center justify-between p-2 rounded-lg border">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{wh.url}</p>
+                              <p className="text-xs text-muted-foreground">{JSON.parse(wh.events).join(', ')}</p>
+                            </div>
+                            <Badge variant={wh.isActive ? 'default' : 'secondary'}>{wh.isActive ? 'Active' : 'Inactive'}</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* API Keys Tab */}
+                  <TabsContent value="api-keys" className="space-y-4">
+                    {orgApiKeys.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No API keys</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {orgApiKeys.map(k => (
+                          <div key={k.id} className="flex items-center justify-between p-2 rounded-lg border">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">{k.name}</p>
+                              <p className="text-xs text-muted-foreground">Created {formatDateOnly(k.createdAt)}</p>
+                            </div>
+                            <Badge variant={k.isActive ? 'default' : 'secondary'}>{k.isActive ? 'Active' : 'Revoked'}</Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* Email Templates Tab */}
+                  <TabsContent value="email-templates" className="space-y-4">
+                    {orgEmailTemplates.length === 0 ? (
+                      <Button variant="outline" className="w-full" onClick={() => { if (store.orgSettingsOrgId) emailTemplatesApi.seed(store.orgSettingsOrgId).then(() => loadOrgSettingsData(store.orgSettingsOrgId!)); }}>
+                        <Plus className="w-4 h-4 mr-2" /> Seed Default Templates
+                      </Button>
+                    ) : (
+                      <div className="space-y-2">
+                        {orgEmailTemplates.map(et => (
+                          <div key={et.id} className="p-2 rounded-lg border">
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium">{et.name}</p>
+                              {et.isDefault && <Badge variant="secondary">Default</Badge>}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">Subject: {et.subject}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">Failed to load organization details.</p>
@@ -2233,7 +2528,31 @@ export default function Home() {
                 </div>
               ))}
               <div className="space-y-1.5">
-                <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs" />
+                <div className="flex gap-1">
+                  <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs flex-1" />
+                  <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => { loadContacts(); setShowContactsPicker(!showContactsPicker); }} title="Pick from contacts">
+                    <Users className="w-3 h-3" />
+                  </Button>
+                </div>
+                {showContactsPicker && contacts.length > 0 && (
+                  <div className="border rounded-md max-h-32 overflow-y-auto bg-background">
+                    {contacts.map(c => (
+                      <button
+                        key={c.id}
+                        className="w-full text-left px-2 py-1.5 text-xs hover:bg-muted flex items-center gap-2"
+                        onClick={() => { setNewSignerName(c.name); setNewSignerEmail(c.email); setShowContactsPicker(false); }}
+                      >
+                        <div className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-[10px] font-bold text-emerald-700 dark:text-emerald-400 shrink-0">
+                          {c.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{c.name}</p>
+                          <p className="text-muted-foreground truncate">{c.email}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Input placeholder="Email" type="email" value={newSignerEmail} onChange={(e) => setNewSignerEmail(e.target.value)} className="h-8 text-xs" onKeyDown={(e) => e.key === 'Enter' && addSigner()} />
                 <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={addSigner} disabled={!newSignerName.trim() || !newSignerEmail.trim()}>
                   <Plus className="w-3 h-3 mr-1" /> Add Signer
@@ -2426,6 +2745,22 @@ export default function Home() {
                   <>
                     <span>·</span>
                     <span>{ccRecipients.length} CC</span>
+                  </>
+                )}
+                {/* Workflow selector */}
+                {availableWorkflows.length > 0 && (
+                  <>
+                    <span>·</span>
+                    <select
+                      value={selectedWorkflowId}
+                      onChange={(e) => setSelectedWorkflowId(e.target.value)}
+                      className="border rounded px-2 py-1 text-sm bg-background"
+                    >
+                      <option value="">No workflow</option>
+                      {availableWorkflows.map(wf => (
+                        <option key={wf.id} value={wf.id}>{wf.name} ({wf.steps.length} steps)</option>
+                      ))}
+                    </select>
                   </>
                 )}
               </div>
@@ -2736,6 +3071,37 @@ export default function Home() {
               </CardTitle>
             </CardHeader>
             <CardContent>
+              {/* Workflow Progress */}
+              {viewerDoc.workflow && (
+                <div className="mb-4 p-3 rounded-lg bg-muted/50 border">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Workflow: {viewerDoc.workflow.name}
+                  </p>
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    {viewerDoc.workflow.steps.map((step, i) => {
+                      const signer = viewerDoc.signers.find(s => s.order === step.order);
+                      const isCompleted = signer?.signedAt;
+                      const isCurrent = !isCompleted && viewerDoc.signers.every(s => s.order < step.order ? !!s.signedAt : true);
+                      return (
+                        <div key={step.id} className="flex items-center gap-1">
+                          <div className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
+                            isCompleted ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                            isCurrent ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 ring-2 ring-amber-400' :
+                            'bg-muted text-muted-foreground'
+                          }`}>
+                            {isCompleted ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 text-center font-bold">{step.order}</span>}
+                            <span className="whitespace-nowrap">{step.user.name}</span>
+                          </div>
+                          {i < viewerDoc.workflow!.steps.length - 1 && (
+                            <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 {viewerDoc.signers.map((signer, i) => (
                   <div key={signer.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
@@ -2892,6 +3258,81 @@ export default function Home() {
               </CardContent>
             )}
           </Card>
+
+          {/* Reminders & Expiry */}
+          {viewerDoc && (viewerDoc.status === 'Sent' || viewerDoc.status === 'Signing') && (
+            <Card>
+              <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowReminders(!showReminders)}>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Clock className="w-4 h-4" /> Reminders & Expiry
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showReminders ? 'rotate-180' : ''}`} />
+                </CardTitle>
+              </CardHeader>
+              {showReminders && (
+                <CardContent className="space-y-4">
+                  {viewerDoc.expiresAt && (
+                    <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20">
+                      <p className="text-xs text-orange-700 dark:text-orange-400 font-medium">
+                        Expires: {new Date(viewerDoc.expiresAt).toLocaleDateString()}
+                        {viewerDoc.expiresAt && new Date(viewerDoc.expiresAt) > new Date()
+                          ? ` (${Math.ceil((new Date(viewerDoc.expiresAt).getTime() - Date.now()) / 86400000)} days left)`
+                          : ' (EXPIRED)'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Auto-scheduled reminders */}
+                  {reminders.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Scheduled Reminders</p>
+                      {reminders.map((rem: any) => (
+                        <div key={rem.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50 text-sm">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary" className="text-xs">{rem.type}</Badge>
+                              <span className="text-xs text-muted-foreground">{new Date(rem.scheduledAt).toLocaleDateString()}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1 truncate">{rem.message}</p>
+                          </div>
+                          <Button variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={async () => {
+                            await remindersApi.delete(rem.id);
+                            setReminders((prev: any[]) => prev.filter((r: any) => r.id !== rem.id));
+                            toast.success('Reminder deleted');
+                          }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add custom reminder */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Add Reminder</p>
+                    <div className="flex gap-2">
+                      <Input type="date" className="h-8 text-xs" value={newReminderDate} onChange={(e) => setNewReminderDate(e.target.value)} />
+                      <Button size="sm" className="h-8 px-3" disabled={!newReminderDate} onClick={async () => {
+                        if (!store.viewingDocumentId || !newReminderDate) return;
+                        try {
+                          const result = await remindersApi.create({
+                            documentId: store.viewingDocumentId,
+                            type: 'follow_up',
+                            scheduledAt: new Date(newReminderDate).toISOString(),
+                            message: newReminderMsg || `Reminder: Please sign "${viewerDoc?.title}"`,
+                          });
+                          setReminders((prev: any[]) => [result.reminder, ...prev]);
+                          setNewReminderDate('');
+                          setNewReminderMsg('');
+                          toast.success('Reminder scheduled');
+                        } catch { toast.error('Failed to schedule reminder'); }
+                      }}>Schedule</Button>
+                    </div>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          )}
+
         </main>
 
         <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto sticky bottom-0 bg-background">

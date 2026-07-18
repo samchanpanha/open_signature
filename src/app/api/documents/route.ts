@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
         title: d.title,
         status: d.status,
         createdAt: d.createdAt,
+        expiresAt: d.expiresAt,
         signerCount: d._count.signers,
         signedCount: d.signers.length,
       }))

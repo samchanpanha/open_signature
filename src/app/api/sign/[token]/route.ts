@@ -66,7 +66,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         email: signer.email,
         name: signer.name,
         order: signer.order,
+        role: signer.role,
         signedAt: signer.signedAt,
+        otpVerified: !!signer.otpVerifiedAt,
         fields: signerFields.map((f) => ({
           id: f.id, type: f.type, pageNumber: f.pageNumber,
           x: f.x, y: f.y, width: f.width, height: f.height, value: f.value,

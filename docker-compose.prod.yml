@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-signature-prod
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./db:/app/db
+      - ./uploads:/app/uploads
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:///app/db/custom.db
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: open-signature-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: always
+
+volumes:
+  caddy_data:
+  caddy_config:

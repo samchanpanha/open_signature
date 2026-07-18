@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: open-signature-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./db:/app/db
+      - ./uploads:/app/uploads
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:///app/db/custom.db
+    command: bun run dev
+    restart: unless-stopped

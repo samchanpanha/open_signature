@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-signature-local
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./db:/app/db
+      - ./uploads:/app/uploads
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:///app/db/custom.db
+    restart: unless-stopped

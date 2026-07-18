@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyToken, generateSignerToken } from '@/lib/auth';
+import { getAlertEngine } from '@/lib/alerts/alert-engine';
+import { dispatchWebhook } from '@/lib/webhooks';
 
 function getAuthUser(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -14,7 +16,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
-    const { signers: signerData, fieldAssignments, ccRecipients, expiresAt, templateId } = await req.json();
+    const { signers: signerData, fieldAssignments, ccRecipients, expiresAt, expiresInDays, templateId, workflowId, currentStepIndex } = await req.json();
 
     if (!signerData || signerData.length === 0) {
       return NextResponse.json({ error: 'At least one signer is required' }, { status: 400 });
@@ -31,13 +33,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `Document is ${document.status}, cannot send` }, { status: 400 });
     }
 
-    // Update document with expiry, template
+    // If workflow is specified, validate it
+    if (workflowId) {
+      const workflow = await db.signatureWorkflow.findUnique({
+        where: { id: workflowId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      });
+      if (!workflow) return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
+      if (!workflow.isActive) return NextResponse.json({ error: 'Workflow is not active' }, { status: 400 });
+    }
+
+    // Determine current step index (default 0 for first step)
+    const stepIdx = currentStepIndex || 0;
+
+    // Compute expiry from expiresInDays if provided
+    const computedExpiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
+      : expiresAt
+        ? new Date(expiresAt)
+        : undefined;
+
+    // Update document with expiry, template, and workflow
     await db.document.update({
       where: { id },
       data: {
         status: 'Sent',
-        ...(expiresAt ? { expiresAt: new Date(expiresAt) } : {}),
+        ...(computedExpiresAt ? { expiresAt: computedExpiresAt } : {}),
         ...(templateId ? { templateId } : {}),
+        ...(workflowId ? { workflowId } : {}),
       },
     });
 
@@ -50,6 +73,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           email: s.email,
           name: s.name,
           order: i + 1,
+          role: s.role || 'signer',
           token: generateSignerToken(),
           documentId: id,
         },
@@ -75,16 +99,63 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
     }
 
+    // If using workflow, create notification for first step signer
+    if (workflowId) {
+      const workflow = await db.signatureWorkflow.findUnique({
+        where: { id: workflowId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      });
+      if (workflow && workflow.steps.length > 0) {
+        const firstStep = workflow.steps[0];
+        const alertEngine = getAlertEngine();
+        await alertEngine.notifyWorkflowStep(firstStep, document.title, id, 1, workflow.steps.length);
+      }
+    }
+
     await db.auditLog.create({
       data: {
         action: 'DOCUMENT_SENT',
         documentId: id,
         userId: payload.userId as string,
-        details: `Document sent to ${signerData.map((s: { email: string }) => s.email).join(', ')}${expiresAt ? `. Expires: ${expiresAt}` : ''}${ccRecipients?.length ? `. CC: ${ccRecipients.map((c: { email: string }) => c.email).join(', ')}` : ''}`,
+        details: `Document sent to ${signerData.map((s: { email: string }) => s.email).join(', ')}${expiresAt || expiresInDays ? `. Expires: ${computedExpiresAt?.toISOString()}` : ''}${ccRecipients?.length ? `. CC: ${ccRecipients.map((c: { email: string }) => c.email).join(', ')}` : ''}${workflowId ? `. Workflow: ${workflowId}` : ''}`,
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
         userAgent: req.headers.get('user-agent') || null,
       },
     });
+
+    // Dispatch webhook
+    if (document.organizationId) {
+      dispatchWebhook(document.organizationId, 'document.sent', {
+        documentId: id,
+        title: document.title,
+        signers: signerData.map((s: { email: string; name: string }) => ({ email: s.email, name: s.name })),
+        sentAt: new Date().toISOString(),
+      });
+    }
+
+    // Auto-schedule reminders before expiry
+    if (computedExpiresAt) {
+      const reminderTimes = [
+        { daysBefore: 1, type: 'signing_due', msg: 'expires tomorrow' },
+        { daysBefore: 3, type: 'follow_up', msg: 'expires in 3 days' },
+        { daysBefore: 7, type: 'follow_up', msg: 'expires in 7 days' },
+      ];
+
+      for (const rt of reminderTimes) {
+        const reminderDate = new Date(computedExpiresAt.getTime() - rt.daysBefore * 24 * 60 * 60 * 1000);
+        if (reminderDate > new Date()) {
+          await db.reminder.create({
+            data: {
+              documentId: id,
+              userId: payload.userId as string,
+              type: rt.type,
+              scheduledAt: reminderDate,
+              message: `Reminder: Document "${document.title}" ${rt.msg}. Please complete signing before ${computedExpiresAt.toISOString().split('T')[0]}.`,
+            },
+          });
+        }
+      }
+    }
 
     const updated = await db.document.findFirst({
       where: { id },
@@ -104,7 +175,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       signedPdfPath: updated!.signedPdfPath,
       ownerId: updated!.ownerId,
       signers: updated!.signers.map((s) => ({
-        id: s.id, email: s.email, name: s.name, order: s.order,
+        id: s.id, email: s.email, name: s.name, order: s.order, role: s.role,
         signedAt: s.signedAt, rejectedAt: s.rejectedAt, rejectionReason: s.rejectionReason, token: s.token,
       })),
       fields: updated!.fields.map((f) => ({

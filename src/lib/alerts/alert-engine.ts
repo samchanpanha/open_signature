@@ -20,20 +20,42 @@ const DEFAULT_CONFIG: AlertConfig = {
 export class AlertEngine {
   private config: AlertConfig;
   private transporter: any;
+  private testMode: boolean;
 
   constructor(config: Partial<AlertConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.testMode = !process.env.SMTP_HOST;
     
     // Configure email transporter
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'localhost',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+    if (this.testMode) {
+      console.log('[AlertEngine] Running in TEST mode - emails will be logged to console');
+      this.transporter = null;
+    } else {
+      this.transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+    }
+  }
+
+  /**
+   * Send email (logs to console in test mode)
+   */
+  private async sendEmail(options: { from: string; to: string; subject: string; html: string }): Promise<void> {
+    if (this.testMode) {
+      console.log('\n[AlertEngine] EMAIL (TEST MODE):');
+      console.log(`  To: ${options.to}`);
+      console.log(`  Subject: ${options.subject}`);
+      console.log(`  Body preview: ${options.html.replace(/<[^>]*>/g, '').substring(0, 100)}...`);
+      console.log('');
+      return;
+    }
+    await this.transporter.sendMail(options);
   }
 
   /**
@@ -149,7 +171,7 @@ export class AlertEngine {
       ? Math.ceil((assignment.dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
-    await this.transporter.sendMail({
+    await this.sendEmail({
       from: process.env.EMAIL_FROM || 'noreply@example.com',
       to: assignment.user.email,
       subject: `Reminder: Document signing due soon - ${assignment.document.title}`,
@@ -176,7 +198,7 @@ export class AlertEngine {
       ? Math.ceil((new Date().getTime() - assignment.dueDate.getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
-    await this.transporter.sendMail({
+    await this.sendEmail({
       from: process.env.EMAIL_FROM || 'noreply@example.com',
       to: assignment.assigner.email,
       cc: assignment.user.email,
@@ -228,6 +250,110 @@ export class AlertEngine {
         documentId: assignment.documentId,
       },
     });
+  }
+
+  /**
+   * Notify a workflow step user that it's their turn to sign
+   */
+  async notifyWorkflowStep(
+    step: { userId: string; name: string; order: number },
+    documentTitle: string,
+    documentId: string,
+    currentStep: number,
+    totalSteps: number
+  ): Promise<void> {
+    const title = 'Your Signature Required';
+    const message = `Step ${currentStep}/${totalSteps}: "${step.name}" — Document "${documentTitle}" is ready for your signature.`;
+
+    // Create in-app notification
+    await prisma.notification.create({
+      data: {
+        type: 'workflow_step',
+        title,
+        message,
+        userId: step.userId,
+        documentId,
+      },
+    });
+
+    // Send email notification
+    const user = await prisma.user.findUnique({ where: { id: step.userId } });
+    if (user) {
+      try {
+        await this.sendEmail({
+          from: process.env.EMAIL_FROM || 'noreply@example.com',
+          to: user.email,
+          subject: `[Step ${currentStep}/${totalSteps}] Signature Required: ${documentTitle}`,
+          html: `
+            <h2>Workflow Step: ${step.name}</h2>
+            <p>Hello ${user.name},</p>
+            <p>A document requires your signature as part of a signing workflow.</p>
+            <p><strong>Document:</strong> ${documentTitle}</p>
+            <p><strong>Step:</strong> ${currentStep} of ${totalSteps} — ${step.name}</p>
+            <p>Please review and sign the document at your earliest convenience.</p>
+            <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}">Open Application</a></p>
+          `,
+        });
+      } catch (error) {
+        console.error('Failed to send workflow step email:', error);
+      }
+    }
+  }
+
+  /**
+   * Notify document owner about status changes
+   */
+  async notifyDocumentOwner(
+    ownerId: string,
+    documentTitle: string,
+    documentId: string,
+    status: string
+  ): Promise<void> {
+    let title = '';
+    let message = '';
+
+    switch (status) {
+      case 'completed':
+        title = 'Document Completed';
+        message = `"${documentTitle}" has been fully signed and completed.`;
+        break;
+      case 'rejected':
+        title = 'Document Rejected';
+        message = `"${documentTitle}" has been rejected by a signer.`;
+        break;
+      default:
+        title = 'Document Status Updated';
+        message = `"${documentTitle}" status changed to ${status}.`;
+    }
+
+    await prisma.notification.create({
+      data: {
+        type: 'status_change',
+        title,
+        message,
+        userId: ownerId,
+        documentId,
+      },
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: ownerId } });
+    if (user) {
+      try {
+        await this.sendEmail({
+          from: process.env.EMAIL_FROM || 'noreply@example.com',
+          to: user.email,
+          subject: `[${status.toUpperCase()}] ${documentTitle}`,
+          html: `
+            <h2>Document ${status.charAt(0).toUpperCase() + status.slice(1)}</h2>
+            <p>Hello ${user.name},</p>
+            <p>The document <strong>"${documentTitle}"</strong> has been ${status}.</p>
+            <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}">View Document</a></p>
+          `,
+        });
+      } catch (error) {
+        console.error('Failed to send document owner email:', error);
+      }
+    }
   }
 }
 

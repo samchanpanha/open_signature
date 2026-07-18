@@ -105,6 +105,18 @@ export interface DocumentDetail extends DocumentListItem {
   originalPdfPath: string;
   signedPdfPath: string | null;
   ownerId: string;
+  workflowId?: string | null;
+  workflow?: {
+    id: string;
+    name: string;
+    steps: {
+      id: string;
+      name: string;
+      order: number;
+      stepType: string;
+      user: { id: string; name: string; email: string };
+    }[];
+  } | null;
   signers: {
     id: string;
     email: string;
@@ -167,10 +179,10 @@ export const documentsApi = {
       return data as DocumentDetail;
     }),
   delete: (id: string) => request(`/api/documents/${id}`, { method: 'DELETE' }),
-  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string) =>
+  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string, workflowId?: string, currentStepIndex?: number) =>
     request<DocumentDetail>(`/api/documents/${id}/send`, {
       method: 'POST',
-      body: JSON.stringify({ signers, fieldAssignments, ccRecipients, expiresAt }),
+      body: JSON.stringify({ signers, fieldAssignments, ccRecipients, expiresAt, workflowId, currentStepIndex }),
     }),
   download: (id: string) =>
     fetch(`/api/documents/${id}/download`, {
@@ -258,4 +270,217 @@ export const signaturesApi = {
     }),
   delete: (id: string) =>
     request(`/api/signatures?id=${id}`, { method: 'DELETE' }),
+};
+
+// Workflows
+export interface WorkflowStep {
+  id: string;
+  name: string;
+  order: number;
+  stepType: string;
+  user: { id: string; email: string; name: string };
+}
+
+export interface WorkflowListItem {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdBy: { id: string; email: string; name: string };
+  documentCount: number;
+  steps: WorkflowStep[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowDetail extends WorkflowListItem {
+  documents: { id: string; title: string; status: string; createdAt: string }[];
+}
+
+export const workflowsApi = {
+  list: (orgId: string) =>
+    request<WorkflowListItem[]>(`/api/workflows?orgId=${orgId}`),
+  get: (id: string) =>
+    request<WorkflowDetail>(`/api/workflows/${id}`),
+  create: (data: { name: string; description?: string; orgId: string; steps: { name: string; stepType: string; userId: string }[] }) =>
+    request<WorkflowListItem>('/api/workflows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: { name?: string; description?: string; isActive?: boolean; steps?: { name: string; stepType: string; userId: string }[] }) =>
+    request<WorkflowListItem>(`/api/workflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request(`/api/workflows/${id}`, { method: 'DELETE' }),
+  export: (id: string) =>
+    request<{ templateVersion: number; name: string; description: string; steps: { name: string; stepType: string; userEmail: string; order: number }[]; exportedAt: string }>(`/api/workflows/${id}/export`),
+  import: (data: { template: { name: string; description?: string; steps: { name: string; stepType: string; userEmail: string; order: number }[] }; orgId: string; nameOverride?: string }) =>
+    request<WorkflowListItem>('/api/workflows/import', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// OTP Verification
+export const otpApi = {
+  requestOtp: (token: string) =>
+    request<{ success: boolean }>(`/api/sign/${token}/request-otp`, { method: 'POST' }),
+  verifyOtp: (token: string, code: string) =>
+    request<{ success: boolean }>(`/api/sign/${token}/verify-otp`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+};
+
+// Completion Certificate
+export const certificateApi = {
+  generate: (documentId: string) =>
+    request<{ certificatePath: string }>(`/api/documents/${documentId}/certificate`),
+};
+
+// Contacts
+export interface Contact {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  company?: string;
+  createdAt: string;
+}
+
+export const contactsApi = {
+  list: () => request<Contact[]>('/api/contacts'),
+  create: (data: { name: string; email: string; phone?: string; company?: string }) =>
+    request<Contact>('/api/contacts', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; email?: string; phone?: string; company?: string }) =>
+    request<Contact>(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/api/contacts/${id}`, { method: 'DELETE' }),
+};
+
+// Folders
+export interface Folder {
+  id: string;
+  name: string;
+  parentId?: string;
+  createdAt: string;
+}
+
+export const foldersApi = {
+  list: (orgId: string) => request<Folder[]>(`/api/folders?orgId=${orgId}`),
+  create: (data: { name: string; parentId?: string; orgId: string }) =>
+    request<Folder>('/api/folders', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name: string }) =>
+    request<Folder>(`/api/folders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/api/folders/${id}`, { method: 'DELETE' }),
+};
+
+// Webhooks
+export interface Webhook {
+  id: string;
+  url: string;
+  events: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export const webhooksApi = {
+  list: (orgId: string) => request<Webhook[]>(`/api/webhooks?orgId=${orgId}`),
+  create: (data: { url: string; events: string[]; orgId: string }) =>
+    request<Webhook>('/api/webhooks', { method: 'POST', body: JSON.stringify({ ...data, events: JSON.stringify(data.events) }) }),
+  update: (id: string, data: { url?: string; events?: string[]; isActive?: boolean }) =>
+    request<Webhook>(`/api/webhooks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, events: data.events ? JSON.stringify(data.events) : undefined }),
+    }),
+  delete: (id: string) => request(`/api/webhooks/${id}`, { method: 'DELETE' }),
+};
+
+// Public Templates
+export interface PublicTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  shareToken: string;
+  fieldConfig: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export const publicTemplatesApi = {
+  list: (orgId: string) => request<PublicTemplate[]>(`/api/public-templates?orgId=${orgId}`),
+  create: (data: { name: string; description?: string; fieldConfig: object; orgId: string }) =>
+    request<PublicTemplate>('/api/public-templates', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, fieldConfig: JSON.stringify(data.fieldConfig) }),
+    }),
+  getByToken: (token: string) => request<PublicTemplate>(`/api/public-templates/${token}`),
+};
+
+// Email Templates
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  htmlBody: string;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export const emailTemplatesApi = {
+  list: (orgId: string) => request<EmailTemplate[]>(`/api/email-templates?orgId=${orgId}`),
+  get: (id: string) => request<EmailTemplate>(`/api/email-templates/${id}`),
+  create: (data: { name: string; subject: string; htmlBody: string; orgId: string }) =>
+    request<EmailTemplate>('/api/email-templates', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; subject?: string; htmlBody?: string }) =>
+    request<EmailTemplate>(`/api/email-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/api/email-templates/${id}`, { method: 'DELETE' }),
+  seed: (orgId: string) =>
+    request<{ created: number }>('/api/email-templates/seed', { method: 'POST', body: JSON.stringify({ orgId }) }),
+};
+
+// API Keys
+export interface ApiKey {
+  id: string;
+  name: string;
+  key?: string;
+  permissions: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export const apiKeysApi = {
+  list: () => request<ApiKey[]>('/api/api-keys'),
+  create: (data: { name: string; permissions: string[]; orgId: string; expiresAt?: string }) =>
+    request<ApiKey & { key: string }>('/api/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, permissions: JSON.stringify(data.permissions) }),
+    }),
+  delete: (id: string) => request(`/api/api-keys/${id}`, { method: 'DELETE' }),
+};
+
+// Reminders
+export interface Reminder {
+  id: string;
+  type: string;
+  scheduledAt: string;
+  sentAt?: string;
+  message: string;
+  documentId: string;
+  createdAt: string;
+}
+
+export const remindersApi = {
+  list: (documentId: string) => request<Reminder[]>(`/api/reminders?documentId=${documentId}`),
+  create: (data: { documentId: string; type?: string; scheduledAt: string; message?: string }) =>
+    request<{ reminder: Reminder }>('/api/reminders', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/api/reminders?id=${id}`, { method: 'DELETE' }),
+};
+
+// Expire check
+export const expireApi = {
+  check: () => request<{ expiredCount: number }>('/api/documents/expire'),
 };

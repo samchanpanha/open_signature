@@ -23,6 +23,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: {
         signers: { orderBy: { order: 'asc' } },
         fields: { orderBy: { pageNumber: 'asc' } },
+        workflow: {
+          include: {
+            steps: { include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { order: 'asc' } },
+          },
+        },
       },
     });
 
@@ -36,6 +41,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       originalPdfPath: document.originalPdfPath,
       signedPdfPath: document.signedPdfPath,
       ownerId: document.ownerId,
+      workflowId: document.workflowId,
+      workflow: document.workflow ? {
+        id: document.workflow.id,
+        name: document.workflow.name,
+        steps: document.workflow.steps.map(s => ({
+          id: s.id,
+          name: s.name,
+          order: s.order,
+          stepType: s.stepType,
+          user: s.user,
+        })),
+      } : null,
       signers: document.signers.map((s) => ({
         id: s.id,
         email: s.email,

@@ -21,6 +21,12 @@ model Organization {
   permissions Permission[]
   formTemplates FormTemplate[]
   assignments Assignment[]
+  workflows SignatureWorkflow[]
+  publicTemplates PublicTemplate[]
+  webhooks  Webhook[]
+  emailTemplates EmailTemplate[]
+  apiKeys   ApiKey[]
+  folders   Folder[]
 }
 
 model OrganizationMember {
@@ -56,6 +62,13 @@ model User {
   assignedDocs     Assignment[]       @relation("AssignedBy")
   notifications    Notification[]
   reminders        Reminder[]
+  createdWorkflows SignatureWorkflow[]
+  workflowSteps    WorkflowStep[]
+  apiKeys          ApiKey[]
+  contacts         Contact[]
+  publicTemplates  PublicTemplate[]
+  webhooks         Webhook[]
+  folders          Folder[]
 }
 
 model Document {
@@ -71,6 +84,7 @@ model Document {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   organizationId  String?
+  folderId        String?
 
   owner         User           @relation(fields: [ownerId], references: [id])
   organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: SetNull)
@@ -81,6 +95,8 @@ model Document {
   templateId    String?
   template      DocumentTemplate? @relation(fields: [templateId], references: [id])
   assignments   Assignment[]
+  workflowId    String?
+  workflow      SignatureWorkflow? @relation(fields: [workflowId], references: [id])
   notifications Notification[]
   reminders     Reminder[]
 }
@@ -102,6 +118,7 @@ model Signer {
   email           String
   name            String
   order           Int       @default(1)
+  role            String    @default("signer") // signer, approver, viewer
   signedAt        DateTime?
   rejectedAt      DateTime?
   rejectionReason String?
@@ -220,6 +237,41 @@ model FormField {
   formTemplate FormTemplate @relation(fields: [formTemplateId], references: [id], onDelete: Cascade)
 }
 
+model SignatureWorkflow {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  orgId       String
+  createdBy   String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User        @relation(fields: [createdBy], references: [id])
+  steps   WorkflowStep[]
+  documents Document[]
+
+  @@unique([orgId, name])
+}
+
+model WorkflowStep {
+  id          String   @id @default(cuid())
+  name        String
+  order       Int
+  stepType    String   @default("sign") // sign, approve, review, cc
+  userId      String
+  workflowId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workflow SignatureWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user     User              @relation(fields: [userId], references: [id])
+
+  @@unique([workflowId, order])
+  @@unique([workflowId, userId])
+}
+
 model Assignment {
   id          String   @id @default(cuid())
   status      String   @default("pending") // pending, in_progress, completed, overdue
@@ -267,4 +319,111 @@ model Reminder {
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model PublicTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  shareToken  String   @unique
+  isActive    Boolean  @default(true)
+  fieldConfig String   // JSON: field definitions
+  orgId       String
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User        @relation(fields: [createdBy], references: [id])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  secret    String
+  events    String   // JSON array of event types
+  isActive  Boolean  @default(true)
+  orgId     String
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User        @relation(fields: [createdBy], references: [id])
+  events_log WebhookEvent[]
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  webhookId  String
+  event      String   // document.created, document.completed, signer.signed, etc.
+  payload    String   // JSON payload
+  status     String   @default("pending") // pending, sent, failed
+  attempts   Int      @default(0)
+  lastError  String?
+  createdAt  DateTime @default(now())
+  sentAt     DateTime?
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+}
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  subject   String
+  htmlBody  String
+  orgId     String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  key       String   @unique
+  permissions String  // JSON array of permissions
+  userId    String
+  orgId     String
+  lastUsedAt DateTime?
+  expiresAt DateTime?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  company   String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  parentId  String?
+  orgId     String
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Folder?      @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Folder[]     @relation("FolderTree")
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator  User         @relation(fields: [createdBy], references: [id])
 }
