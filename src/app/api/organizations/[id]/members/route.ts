@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { verifyToken, hashPassword } from '@/lib/auth';
+import crypto from 'crypto';
 
 function getAuthUser(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
   if (!authHeader?.startsWith('Bearer ')) return null;
   return verifyToken(authHeader.slice(7));
 }
+
+const MANAGEABLE_ROLES = ['admin', 'editor', 'signer', 'viewer', 'member'];
 
 // List members
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -25,15 +28,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const members = await db.organizationMember.findMany({
       where: { orgId },
-      include: { user: { select: { id: true, email: true, name: true } } },
-      orderBy: { joinedAt: 'asc' },
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+        inviter: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
     });
 
     return NextResponse.json(members.map(m => ({
       id: m.id,
       role: m.role,
+      inviteStatus: m.inviteStatus,
+      isActive: m.isActive,
+      lastLoginAt: m.lastLoginAt,
       joinedAt: m.joinedAt,
+      createdAt: m.createdAt,
       user: m.user,
+      inviter: m.inviter,
     })));
   } catch (error) {
     console.error('List members error:', error);
@@ -41,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-// Invite member (by email - must be existing user)
+// Invite or create sub-member
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = getAuthUser(req);
@@ -49,7 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { id: orgId } = await params;
     const userId = payload.userId as string;
-    const { email, role = 'member' } = await req.json();
+    const { email, name, role = 'member', password } = await req.json();
 
     if (!email?.trim()) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
@@ -60,13 +71,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { orgId, userId },
     });
     if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
-      return NextResponse.json({ error: 'Only owner or admin can invite' }, { status: 403 });
+      return NextResponse.json({ error: 'Only owner or admin can invite members' }, { status: 403 });
     }
 
-    // Find user by email
-    const targetUser = await db.user.findFirst({ where: { email: email.trim().toLowerCase() } });
+    // Validate role
+    if (!MANAGEABLE_ROLES.includes(role)) {
+      return NextResponse.json({ error: `Invalid role. Must be one of: ${MANAGEABLE_ROLES.join(', ')}` }, { status: 400 });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if user already exists
+    let targetUser = await db.user.findFirst({ where: { email: normalizedEmail } });
+    let tempPassword: string | null = null;
+    let isNewUser = false;
+
     if (!targetUser) {
-      return NextResponse.json({ error: 'User not found. They must register first.' }, { status: 404 });
+      // Auto-create user account with provided or generated password
+      tempPassword = password || crypto.randomBytes(8).toString('hex');
+      const hashedPassword = await hashPassword(tempPassword);
+
+      targetUser = await db.user.create({
+        data: {
+          email: normalizedEmail,
+          name: name || normalizedEmail.split('@')[0],
+          password: hashedPassword,
+        },
+      });
+      isNewUser = true;
     }
 
     // Check if already a member
@@ -74,23 +106,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { orgId, userId: targetUser.id },
     });
     if (existing) {
-      return NextResponse.json({ error: 'User is already a member' }, { status: 409 });
+      return NextResponse.json({ error: 'User is already a member of this organization' }, { status: 409 });
     }
 
     const member = await db.organizationMember.create({
       data: {
         userId: targetUser.id,
         orgId,
-        role: role === 'admin' ? 'admin' : 'member',
+        role,
+        inviteStatus: isNewUser ? 'pending' : 'active',
+        invitedBy: userId,
       },
-      include: { user: { select: { id: true, email: true, name: true } } },
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+        inviter: { select: { id: true, name: true, email: true } },
+      },
     });
 
     return NextResponse.json({
       id: member.id,
       role: member.role,
+      inviteStatus: member.inviteStatus,
+      isActive: member.isActive,
       joinedAt: member.joinedAt,
+      createdAt: member.createdAt,
       user: member.user,
+      inviter: member.inviter,
+      ...(isNewUser && tempPassword && { tempPassword }),
+      isNewUser,
     }, { status: 201 });
   } catch (error) {
     console.error('Invite member error:', error);

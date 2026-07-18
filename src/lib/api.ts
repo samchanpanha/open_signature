@@ -27,11 +27,16 @@ export const authApi = {
       body: JSON.stringify({ email, name, password }),
     }),
   login: (email: string, password: string) =>
-    request<{ token: string; user: { id: string; email: string; name: string } }>('/api/auth/login', {
+    request<{ token?: string; user?: { id: string; email: string; name: string }; requiresPasswordSetup?: boolean; message?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
   me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
+  setupPassword: (email: string, password: string) =>
+    request<{ success: boolean; message: string }>('/api/auth/setup-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
 };
 
 // Organizations
@@ -58,8 +63,15 @@ export interface OrgDetail extends OrgListItem {
 export interface OrgMember {
   id: string;
   role: string;
+  inviteStatus: string;
+  isActive: boolean;
+  lastLoginAt: string | null;
   joinedAt: string;
+  createdAt: string;
   user: { id: string; email: string; name: string };
+  inviter?: { id: string; name: string; email: string } | null;
+  tempPassword?: string;
+  isNewUser?: boolean;
 }
 
 export const orgApi = {
@@ -72,10 +84,15 @@ export const orgApi = {
     }),
   delete: (id: string) => request(`/api/organizations/${id}`, { method: 'DELETE' }),
   listMembers: (orgId: string) => request<OrgMember[]>(`/api/organizations/${orgId}/members`),
-  inviteMember: (orgId: string, email: string, role?: string) =>
+  inviteMember: (orgId: string, email: string, role?: string, name?: string, password?: string) =>
     request<OrgMember>(`/api/organizations/${orgId}/members`, {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email, role, name, password }),
+    }),
+  updateMember: (orgId: string, memberId: string, data: { role?: string; isActive?: boolean; inviteStatus?: string }) =>
+    request<OrgMember>(`/api/organizations/${orgId}/members/${memberId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
   updateMemberRole: (orgId: string, memberId: string, role: string) =>
     request<OrgMember>(`/api/organizations/${orgId}/members/${memberId}`, {
@@ -84,6 +101,10 @@ export const orgApi = {
     }),
   removeMember: (orgId: string, memberId: string) =>
     request(`/api/organizations/${orgId}/members/${memberId}`, { method: 'DELETE' }),
+  sendInviteNotification: (orgId: string, memberId: string) =>
+    request<{ success: boolean; message: string }>(`/api/organizations/${orgId}/members/${memberId}/invite`, {
+      method: 'POST',
+    }),
 };
 
 // Documents
@@ -99,6 +120,9 @@ export interface DocumentListItem {
   rejectionReason?: string | null;
   rejectedBy?: string | null;
   organizationId?: string | null;
+  owner?: { id: string; name: string; email: string };
+  isOwner?: boolean;
+  ownerRole?: string | null;
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -165,8 +189,13 @@ export interface SignerInfo {
 }
 
 export const documentsApi = {
-  list: (orgId?: string | null) => {
-    const query = orgId !== undefined ? `?orgId=${orgId}` : '';
+  list: (orgId?: string | null, search?: string, signerEmail?: string, folderId?: string | null) => {
+    const params = new URLSearchParams();
+    if (orgId !== undefined) params.set('orgId', orgId);
+    if (search) params.set('search', search);
+    if (signerEmail) params.set('signerEmail', signerEmail);
+    if (folderId !== undefined) params.set('folderId', folderId || '');
+    const query = params.toString() ? `?${params.toString()}` : '';
     return request<DocumentListItem[]>(`/api/documents${query}`);
   },
   get: (id: string) => request<DocumentDetail>(`/api/documents/${id}`),
@@ -181,6 +210,28 @@ export const documentsApi = {
       return data as DocumentDetail;
     }),
   delete: (id: string) => request(`/api/documents/${id}`, { method: 'DELETE' }),
+  rename: (id: string, title: string) =>
+    request<{ id: string; title: string }>(`/api/documents/${id}/rename`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    }),
+  resend: (id: string, signerIds?: string[]) =>
+    request<{ success: boolean; resent: number }>(`/api/documents/${id}/resend`, {
+      method: 'POST',
+      body: JSON.stringify({ signerIds: signerIds || [] }),
+    }),
+  formData: (id: string, format: 'json' | 'csv' = 'json') =>
+    request<{ documentId: string; title: string; fields: any[] }>(`/api/documents/${id}/form-data?format=${format}`),
+  moveToFolder: (id: string, folderId: string | null) =>
+    request<{ document: any }>(`/api/documents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ folderId }),
+    }),
+  bulk: (action: 'move' | 'delete', documentIds: string[], folderId?: string | null) =>
+    request<{ affected: number }>('/api/documents/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ action, documentIds, folderId }),
+    }),
   send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string, workflowId?: string, currentStepIndex?: number) =>
     request<DocumentDetail>(`/api/documents/${id}/send`, {
       method: 'POST',
@@ -259,6 +310,8 @@ export const templatesApi = {
       method: 'POST',
       body: JSON.stringify({ name, fieldConfig }),
     }),
+  duplicate: (id: string) =>
+    request<{ id: string; name: string }>(`/api/templates/${id}/duplicate`, { method: 'POST' }),
   delete: (id: string) => request(`/api/templates/${id}`, { method: 'DELETE' }),
 };
 
@@ -556,6 +609,296 @@ export const offlineSignApi = {
     request<{ allowOfflineSign: boolean }>(`/api/templates/${templateId}/offline`),
   toggle: (templateId: string, allowOfflineSign: boolean) =>
     request(`/api/templates/${templateId}/offline`, { method: 'PUT', body: JSON.stringify({ allowOfflineSign }) }),
+};
+
+// Permissions
+export const permissionsApi = {
+  list: (orgId: string) =>
+    request<{ id: string; resource: string; action: string; granted: boolean; userId: string; user?: { email: string; name: string } }[]>(`/api/permissions?orgId=${orgId}`),
+  grant: (data: { userId: string; orgId: string; resource: string; action: string; granted?: boolean }) =>
+    request('/api/permissions', { method: 'POST', body: JSON.stringify(data) }),
+  revoke: (permissionId: string) =>
+    request(`/api/permissions?id=${permissionId}`, { method: 'DELETE' }),
+  applyRole: (userId: string, orgId: string, role: string) =>
+    request<{ success: boolean; role: string; permissionsCreated: number }>('/api/permissions/batch', {
+      method: 'POST',
+      body: JSON.stringify({ userId, orgId, role }),
+    }),
+};
+
+// Document Permissions
+export interface DocumentPermission {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: string;
+  resource: string;
+}
+
+export interface OrgMemberForDoc {
+  userId: string;
+  role: string;
+  name: string;
+  email: string;
+}
+
+export interface DocAccessEntry {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  accessType: 'owner' | 'role' | 'shared';
+}
+
+export const documentPermissionsApi = {
+  get: (docId: string) =>
+    request<{ permissions: DocumentPermission[]; orgMembers: OrgMemberForDoc[]; allAccess: DocAccessEntry[] }>(`/api/documents/${docId}/permissions`),
+  add: (docId: string, targetUserId: string, action: string) =>
+    request<{ id: string; success: boolean }>(`/api/documents/${docId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUserId, action }),
+    }),
+  remove: (docId: string, targetUserId: string, action: string) =>
+    request<{ success: boolean }>(`/api/documents/${docId}/permissions?userId=${targetUserId}&action=${action}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Template Permissions
+export const templatePermissionsApi = {
+  get: (templateId: string) =>
+    request<{ permissions: DocumentPermission[]; orgMembers: OrgMemberForDoc[] }>(`/api/templates/${templateId}/permissions`),
+  add: (templateId: string, targetUserId: string, action: string) =>
+    request<{ id: string; success: boolean }>(`/api/templates/${templateId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUserId, action }),
+    }),
+  remove: (templateId: string, targetUserId: string, action: string) =>
+    request<{ success: boolean }>(`/api/templates/${templateId}/permissions?userId=${targetUserId}&action=${action}`, {
+      method: 'DELETE',
+    }),
+};
+
+// User Permissions Overview
+export interface UserDocumentPermission {
+  id: string;
+  action: string;
+  documentId: string;
+  documentTitle: string;
+  organizationId: string | null;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+export interface UserTemplatePermission {
+  id: string;
+  action: string;
+  templateId: string;
+  templateName: string;
+  organizationId: string | null;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+export interface UserOrgMembership {
+  orgId: string;
+  orgName: string;
+  role: string;
+  isActive: boolean;
+}
+
+export const userPermissionsApi = {
+  get: (userId: string) =>
+    request<{
+      documentPermissions: UserDocumentPermission[];
+      templatePermissions: UserTemplatePermission[];
+      memberships: UserOrgMembership[];
+      totalPermissions: number;
+    }>(`/api/users/${userId}/permissions`),
+  revokeAll: (userId: string, orgId: string) =>
+    request<{ success: boolean; revoked: number }>(`/api/users/${userId}/permissions/revoke-all`, {
+      method: 'POST',
+      body: JSON.stringify({ orgId }),
+    }),
+};
+
+// Bulk Permissions
+export interface BulkPermissionItem {
+  userId: string;
+  documentId?: string;
+  templateId?: string;
+  action: string;
+}
+
+export const bulkPermissionsApi = {
+  set: (permissions: BulkPermissionItem[], orgId?: string) =>
+    request<{ success: boolean; created: number; skipped: number }>('/api/permissions/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ permissions, orgId }),
+    }),
+};
+
+// Expiring Permissions
+export interface ExpiringPermission {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: string;
+  resource: string;
+  documentId: string | null;
+  documentTitle: string | null;
+  templateId: string | null;
+  templateName: string | null;
+  orgId: string | null;
+  orgName: string | null;
+  expiresAt: string;
+  daysUntilExpiry: number;
+}
+
+export const expiringPermissionsApi = {
+  get: (days: number = 7, orgId?: string) => {
+    const params = new URLSearchParams();
+    params.set('days', days.toString());
+    if (orgId) params.set('orgId', orgId);
+    return request<{ permissions: ExpiringPermission[]; total: number }>(`/api/permissions/expiring?${params.toString()}`);
+  },
+};
+
+// Permission Extension
+export const permissionExtensionApi = {
+  extend: (permissionId: string, days: number) =>
+    request<{ success: boolean; newExpiresAt: string }>(`/api/permissions/${permissionId}/extend`, {
+      method: 'POST',
+      body: JSON.stringify({ days }),
+    }),
+};
+
+// Organization Permissions Overview
+export interface OrgPermission {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: string;
+  resource: string;
+  documentId: string | null;
+  documentTitle: string | null;
+  templateId: string | null;
+  templateName: string | null;
+  grantedBy: string;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface OrgUserPermissions {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  documentCount: number;
+  templateCount: number;
+  permissions: OrgPermission[];
+}
+
+export const orgPermissionsApi = {
+  get: (orgId: string, resource?: 'document' | 'template', includeExpired?: boolean) => {
+    const params = new URLSearchParams();
+    if (resource) params.set('resource', resource);
+    if (includeExpired) params.set('includeExpired', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request<{ permissions: OrgPermission[]; byUser: OrgUserPermissions[]; total: number }>(
+      `/api/organizations/${orgId}/permissions${query}`
+    );
+  },
+  export: (orgId: string) => {
+    return `/api/organizations/${orgId}/permissions/export`;
+  },
+  history: (orgId: string, limit?: number, offset?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', limit.toString());
+    if (offset) params.set('offset', offset.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request<{ history: PermissionHistoryEntry[]; totalCount: number; hasMore: boolean }>(
+      `/api/organizations/${orgId}/permissions/history${query}`
+    );
+  },
+};
+
+// Permission Templates
+export interface PermissionTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  orgId: string;
+  permissions: string; // JSON array
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PermissionTemplateListItem {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: Array<{ resource: string; action: string }>;
+}
+
+export const permissionTemplatesApi = {
+  list: (orgId: string) =>
+    request<{ templates: PermissionTemplate[] }>(`/api/organizations/${orgId}/permission-templates`),
+  create: (orgId: string, data: { name: string; description?: string; permissions: Array<{ resource: string; action: string }> }) =>
+    request<{ template: PermissionTemplate }>(`/api/organizations/${orgId}/permission-templates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (orgId: string, templateId: string, data: { name?: string; description?: string; permissions?: Array<{ resource: string; action: string }> }) =>
+    request<{ template: PermissionTemplate }>(`/api/organizations/${orgId}/permission-templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (orgId: string, templateId: string) =>
+    request<{ success: boolean }>(`/api/organizations/${orgId}/permission-templates/${templateId}`, {
+      method: 'DELETE',
+    }),
+  apply: (orgId: string, templateId: string, targetUserId: string) =>
+    request<{ templateName: string; permissionsApplied: number }>(`/api/organizations/${orgId}/permission-templates/${templateId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUserId }),
+    }),
+};
+
+// Permission History
+export interface PermissionHistoryEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: string;
+  details: string | null;
+  createdAt: string;
+}
+
+// Activity Log
+export interface ActivityLogEntry {
+  id: string;
+  action: string;
+  details: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string };
+  document: { id: string; title: string } | null;
+}
+
+export const activityApi = {
+  get: (orgId: string, limit?: number, offset?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', limit.toString());
+    if (offset) params.set('offset', offset.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request<{ activities: ActivityLogEntry[]; totalCount: number; hasMore: boolean }>(
+      `/api/organizations/${orgId}/activity${query}`
+    );
+  },
 };
 
 // Onboarding

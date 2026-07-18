@@ -8,7 +8,8 @@ import {
   AlertCircle, CheckCircle2, MousePointer, Edit3, Image as ImageIcon,
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
-  GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle
+  GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle,
+  Share2, FolderOpen
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import OnboardingTour from '@/components/onboarding-tour';
+import { TeamMemberManager } from '@/components/permissions/team-member-manager';
+import { ShareDocumentDialog } from '@/components/permissions/share-document-dialog';
 import { useAppStore, type AppView, type User } from '@/lib/store';
 import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, bulkSendApi, passwordApi, downloadLinkApi, analyticsApi, brandingApi, profileApi, onboardingApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
 import { toast } from 'sonner';
@@ -320,6 +323,7 @@ export default function Home() {
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [deleteOrgConfirm, setDeleteOrgConfirm] = useState(false);
   const [deletingOrg, setDeletingOrg] = useState(false);
+  const [currentOrgRole, setCurrentOrgRole] = useState<string | null>(null);
 
   // Editor
   const [editorDoc, setEditorDoc] = useState<DocumentDetail | null>(null);
@@ -407,6 +411,24 @@ export default function Home() {
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
 
+  // View mode (grid/list)
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  // Signer email search
+  const [signerEmailSearch, setSignerEmailSearch] = useState('');
+
+  // Rename document
+  const [renamingDocId, setRenamingDocId] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState('');
+  const [sharingDocId, setSharingDocId] = useState<string | null>(null);
+  const [sharingDocTitle, setSharingDocTitle] = useState('');
+  const [movingDocId, setMovingDocId] = useState<string | null>(null);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderName, setRenamingFolderName] = useState('');
+
   // Org Settings Tabs
   const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates'>('members');
   const [orgWebhooks, setOrgWebhooks] = useState<Webhook[]>([]);
@@ -457,12 +479,22 @@ export default function Home() {
 
     setAuthLoading(true);
     try {
-      const result = authMode === 'register'
-        ? await authApi.register(authEmail, authName, authPassword)
-        : await authApi.login(authEmail, authPassword);
-      store.setAuth(result.user, result.token);
-      store.setView('dashboard');
-      toast.success(`Welcome${result.user.name ? ', ' + result.user.name : ''}!`);
+      if (authMode === 'register') {
+        const result = await authApi.register(authEmail, authName, authPassword);
+        store.setAuth(result.user, result.token);
+        store.setView('dashboard');
+        toast.success(`Welcome${result.user.name ? ', ' + result.user.name : ''}!`);
+      } else {
+        const result = await authApi.login(authEmail, authPassword);
+        if (result.requiresPasswordSetup) {
+          // Redirect to setup-password with email pre-filled
+          window.location.href = `/setup-password?email=${encodeURIComponent(authEmail)}`;
+          return;
+        }
+        store.setAuth(result.user!, result.token!);
+        store.setView('dashboard');
+        toast.success(`Welcome${result.user!.name ? ', ' + result.user!.name : ''}!`);
+      }
     } catch (err: any) {
       toast.error(err.message || 'Authentication failed');
     } finally {
@@ -509,9 +541,22 @@ export default function Home() {
     }
   };
 
-  const handleSelectOrg = (orgId: string | null) => {
+  const handleSelectOrg = async (orgId: string | null) => {
     store.setCurrentOrgId(orgId);
     setOrgDropdownOpen(false);
+
+    // Fetch user's role in the selected org
+    if (orgId) {
+      try {
+        const members = await orgApi.listMembers(orgId);
+        const myMembership = members.find(m => m.user.id === store.user?.id);
+        setCurrentOrgRole(myMembership?.role || null);
+      } catch {
+        setCurrentOrgRole(null);
+      }
+    } else {
+      setCurrentOrgRole(null);
+    }
   };
 
   const loadOrgDetail = useCallback(async (orgId: string) => {
@@ -595,18 +640,45 @@ export default function Home() {
     }
   };
 
+  const handleExportFormData = async (e: React.MouseEvent, docId: string, docTitle: string) => {
+    e.stopPropagation();
+    try {
+      const d = await documentsApi.formData(docId, 'csv');
+      const csvRows = d.fields.map((f: any) => `"${f.fieldName}","${f.fieldType}","${f.value}","${f.signerEmail}"`).join('\n');
+      const blob = new Blob([csvRows], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = docTitle + '-form-data.csv';
+      a.click();
+      toast.success('Form data exported');
+    } catch {
+      toast.error('Export failed');
+    }
+  };
+
+  const handleResendLinks = async (e: React.MouseEvent, docId: string) => {
+    e.stopPropagation();
+    try {
+      const r = await documentsApi.resend(docId);
+      toast.success('Resent to ' + r.resent + ' signer(s)');
+    } catch {
+      toast.error('Failed to resend');
+    }
+  };
+
   // ============ DASHBOARD ============
   const loadDocuments = useCallback(async () => {
     setDashLoading(true);
     try {
-      const docs = await documentsApi.list(store.currentOrgId);
+      const docs = await documentsApi.list(store.currentOrgId, undefined, signerEmailSearch || undefined, currentFolderId);
       setDocuments(docs);
     } catch {
       toast.error('Failed to load documents');
     } finally {
       setDashLoading(false);
     }
-  }, [store.currentOrgId]);
+  }, [store.currentOrgId, signerEmailSearch, currentFolderId]);
 
   const loadTemplates = useCallback(async () => {
     setTemplateLoading(true);
@@ -660,6 +732,17 @@ export default function Home() {
     if (!store.currentOrgId) return null;
     return orgs.find(o => o.id === store.currentOrgId) || null;
   }, [orgs, store.currentOrgId]);
+
+  // Permission helpers based on current org role
+  const isOwner = currentOrgRole === 'owner';
+  const isAdmin = currentOrgRole === 'admin';
+  const isEditor = currentOrgRole === 'editor';
+  const isSigner = currentOrgRole === 'signer';
+  const isViewer = currentOrgRole === 'viewer';
+  const canCreateDoc = !store.currentOrgId || isOwner || isAdmin || isEditor;
+  const canDeleteDoc = !store.currentOrgId || isOwner || isAdmin || isEditor;
+  const canSendDoc = !store.currentOrgId || isOwner || isAdmin || isEditor;
+  const canManageTeam = !store.currentOrgId || isOwner || isAdmin;
 
   const handleUpload = async () => {
     if (!uploadFile) { toast.error('Please select a PDF'); return; }
@@ -1377,6 +1460,7 @@ export default function Home() {
     try {
       await signingApi.complete(store.signingToken);
       setSigningComplete(true);
+      fireConfetti();
       toast.success('Signing completed successfully!');
     } catch (err: any) {
       toast.error(err.message || 'Failed to complete signing');
@@ -1411,6 +1495,51 @@ export default function Home() {
     const diff = expiry.getTime() - now.getTime();
     return diff > 0 && diff < 24 * 60 * 60 * 1000;
   }, [signingInfo]);
+
+  // ============ CONFETTI ============
+  const fireConfetti = useCallback(() => {
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999';
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const colors = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4'];
+    const pieces: { x: number; y: number; vx: number; vy: number; w: number; h: number; color: string; r: number; rot: number }[] = [];
+    for (let i = 0; i < 120; i++) {
+      pieces.push({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * 200,
+        vx: (Math.random() - 0.5) * 6,
+        vy: Math.random() * 4 + 2,
+        w: Math.random() * 10 + 5,
+        h: Math.random() * 6 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        r: Math.random() * 0.5 - 0.25,
+        rot: Math.random() * Math.PI * 2,
+      });
+    }
+    let frame = 0;
+    const animate = () => {
+      if (frame > 180) { document.body.removeChild(canvas); return; }
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const p of pieces) {
+        p.x += p.vx;
+        p.vy += 0.08;
+        p.y += p.vy;
+        p.rot += p.r;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      frame++;
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }, []);
 
   // ============ RENDER ============
   if (!mounted) return null;
@@ -1785,11 +1914,41 @@ export default function Home() {
           <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg z-40 p-4">
             <div className="max-w-2xl mx-auto flex gap-3">
               <Button
-                onClick={handleCompleteSigning}
+                onClick={async () => {
+                  // Quick Sign: auto-fill remaining text fields with signer name, then complete
+                  if (!store.signingToken || !signingInfo) return;
+                  const signerName = signingInfo.signer.name || signingInfo.signer.email;
+                  for (const field of signingInfo.signer.fields) {
+                    if (!signingFieldValues[field.id]?.trim() && field.type === 'text') {
+                      await signingApi.updateField(store.signingToken, field.id, signerName);
+                    }
+                    if (!signingFieldValues[field.id]?.trim() && field.type === 'date') {
+                      await signingApi.updateField(store.signingToken, field.id, new Date().toISOString().split('T')[0]);
+                    }
+                  }
+                  // Reload signing info to get updated values
+                  const info = await signingApi.getInfo(store.signingToken);
+                  setSigningInfo(info);
+                  const vals: Record<string, string> = {};
+                  info.signer.fields.forEach(f => { if (f.value) vals[f.id] = f.value; });
+                  setSigningFieldValues(vals);
+                  // Now complete
+                  setSigningLoading(true);
+                  try {
+                    await signingApi.complete(store.signingToken);
+                    setSigningComplete(true);
+                    fireConfetti();
+                    toast.success('Quick signed successfully!');
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to complete signing');
+                  } finally {
+                    setSigningLoading(false);
+                  }
+                }}
                 disabled={signingLoading}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white h-12 text-base"
               >
-                {signingLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Complete Signing</>}
+                {signingLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Quick Sign & Complete</>}
               </Button>
               <Button
                 onClick={() => setRejectDialog(true)}
@@ -1973,8 +2132,8 @@ export default function Home() {
                         <Plus className="w-4 h-4" />
                         Create Organization
                       </button>
-                      {/* Org Settings (if an org is selected) */}
-                      {currentOrg && (
+                      {/* Org Settings (if an org is selected and user can manage) */}
+                      {currentOrg && canManageTeam && (
                         <button
                           className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
                           onClick={() => { setOrgDropdownOpen(false); store.openOrgSettings(currentOrg.id); }}
@@ -2006,9 +2165,11 @@ export default function Home() {
                 <Badge variant="secondary" className="text-xs">{currentOrg.role}</Badge>
                 <span className="text-emerald-600 dark:text-emerald-400">{currentOrg.documentCount} docs</span>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => store.openOrgSettings(currentOrg.id)} className="text-emerald-700 dark:text-emerald-400">
-                <UserCog className="w-4 h-4" />
-              </Button>
+              {canManageTeam && (
+                <Button variant="ghost" size="sm" onClick={() => store.openOrgSettings(currentOrg.id)} className="text-emerald-700 dark:text-emerald-400">
+                  <UserCog className="w-4 h-4" />
+                </Button>
+              )}
             </motion.div>
           )}
 
@@ -2066,42 +2227,83 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => { if (store.currentOrgId) { setNewFolderName(''); setCreatingFolder(true); } }} disabled={!store.currentOrgId} title="Create folder">
-                <FileText className="w-4 h-4 mr-1" /> Folder
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => {
-                const draftDocs = documents.filter((d: any) => d.status === 'Draft');
-                if (draftDocs.length === 0) { toast.error('No draft documents available for bulk send'); return; }
-                const docId = prompt('Enter draft document ID to bulk send:');
-                if (!docId) return;
-                const emails = prompt('Enter recipient emails (comma-separated):\nFormat: email1,name1;email2,name2');
-                if (!emails) return;
-                const recipients = emails.split(';').map((e: string) => {
-                  const [email, name] = e.split(',').map((s: string) => s.trim());
-                  return { email, name: name || email };
-                });
-                bulkSendApi.send(docId, recipients).then((r: any) => {
-                  toast.success(`Bulk sent to ${r.totalSent} recipients`);
-                  loadDocuments();
-                }).catch(() => toast.error('Bulk send failed'));
-              }}>
-                <CopyPlus className="w-4 h-4 mr-1" /> Bulk Send
-              </Button>
-              <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> New Document
-              </Button>
+              {canCreateDoc && (
+                <Button variant="outline" size="sm" onClick={() => { if (store.currentOrgId) { setNewFolderName(''); setCreatingFolder(true); } }} disabled={!store.currentOrgId} title="Create folder">
+                  <FileText className="w-4 h-4 mr-1" /> Folder
+                </Button>
+              )}
+              {canSendDoc && (
+                <Button variant="outline" size="sm" onClick={() => {
+                  const draftDocs = documents.filter((d: any) => d.status === 'Draft');
+                  if (draftDocs.length === 0) { toast.error('No draft documents available for bulk send'); return; }
+                  const docId = prompt('Enter draft document ID to bulk send:');
+                  if (!docId) return;
+                  const emails = prompt('Enter recipient emails (comma-separated):\nFormat: email1,name1;email2,name2');
+                  if (!emails) return;
+                  const recipients = emails.split(';').map((e: string) => {
+                    const [email, name] = e.split(',').map((s: string) => s.trim());
+                    return { email, name: name || email };
+                  });
+                  bulkSendApi.send(docId, recipients).then((r: any) => {
+                    toast.success(`Bulk sent to ${r.totalSent} recipients`);
+                    loadDocuments();
+                  }).catch(() => toast.error('Bulk send failed'));
+                }}>
+                  <CopyPlus className="w-4 h-4 mr-1" /> Bulk Send
+                </Button>
+              )}
+              {canCreateDoc ? (
+                <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                  <Plus className="w-4 h-4 mr-2" /> New Document
+                </Button>
+              ) : isSigner ? (
+                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                  <CheckCircle className="w-3 h-3 mr-1" /> Signer Role
+                </Badge>
+              ) : isViewer ? (
+                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
+                  <Eye className="w-3 h-3 mr-1" /> Viewer Role
+                </Badge>
+              ) : null}
             </div>
           </div>
 
           {/* Search Bar */}
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search documents by title..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search by document title..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search by signer email..."
+                value={signerEmailSearch}
+                onChange={(e) => setSignerEmailSearch(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <div className="flex border rounded-md overflow-hidden">
+              <button
+                className={`p-2 ${viewMode === 'grid' ? 'bg-emerald-600 text-white' : 'bg-background hover:bg-muted'}`}
+                onClick={() => setViewMode('grid')}
+                title="Grid view"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+              </button>
+              <button
+                className={`p-2 ${viewMode === 'list' ? 'bg-emerald-600 text-white' : 'bg-background hover:bg-muted'}`}
+                onClick={() => setViewMode('list')}
+                title="List view"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Folder Navigation */}
@@ -2114,13 +2316,50 @@ export default function Home() {
                 All
               </button>
               {folders.map(f => (
-                <button
-                  key={f.id}
-                  className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${currentFolderId === f.id ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 font-medium' : 'text-muted-foreground hover:bg-muted'}`}
-                  onClick={() => setCurrentFolderId(f.id)}
-                >
-                  <FileText className="w-3 h-3" /> {f.name}
-                </button>
+                renamingFolderId === f.id ? (
+                  <input
+                    key={f.id}
+                    type="text"
+                    value={renamingFolderName}
+                    onChange={(e) => setRenamingFolderName(e.target.value)}
+                    onBlur={async () => {
+                      if (renamingFolderName.trim() && renamingFolderName !== f.name) {
+                        try {
+                          await foldersApi.update(f.id, { name: renamingFolderName.trim() });
+                          toast.success('Folder renamed');
+                          loadFolders();
+                        } catch {
+                          toast.error('Failed to rename folder');
+                        }
+                      }
+                      setRenamingFolderId(null);
+                    }}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter') {
+                        (e.target as HTMLInputElement).blur();
+                      } else if (e.key === 'Escape') {
+                        setRenamingFolderId(null);
+                      }
+                    }}
+                    className="text-xs px-2 py-1 rounded border bg-background w-32"
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <button
+                    key={f.id}
+                    className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${currentFolderId === f.id ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                    onClick={() => setCurrentFolderId(f.id)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setRenamingFolderId(f.id);
+                      setRenamingFolderName(f.name);
+                    }}
+                    title="Double-click to rename"
+                  >
+                    <FileText className="w-3 h-3" /> {f.name}
+                  </button>
+                )
               ))}
             </div>
           )}
@@ -2162,18 +2401,34 @@ export default function Home() {
               )}
             </motion.div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className={viewMode === 'grid' ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'flex flex-col gap-2'}>
+              {/* Bulk Actions Bar */}
+              {selectedDocs.size > 0 && canCreateDoc && (
+                <div className={`col-span-full flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 mb-2 ${viewMode === 'list' ? '' : ''}`}>
+                  <span className="text-sm font-medium">{selectedDocs.size} selected</span>
+                  <Button size="sm" variant="outline" onClick={() => setBulkMoveOpen(true)}>
+                    <FolderOpen className="w-3.5 h-3.5 mr-1" /> Move to Folder
+                  </Button>
+                  <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" onClick={() => setBulkDeleteOpen(true)}>
+                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelectedDocs(new Set())}>
+                    <X className="w-3.5 h-3.5 mr-1" /> Clear
+                  </Button>
+                </div>
+              )}
               {filteredDocuments.map((doc, i) => (
                 <motion.div
                   key={doc.id}
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
-                  transition={{ delay: i * 0.05 }}
+                  transition={{ delay: i * 0.03 }}
                 >
+                  {viewMode === 'grid' ? (
                   <Card
                     className="cursor-pointer hover:shadow-md transition-shadow group"
                     onClick={() => {
-                      if (doc.status === 'Draft') {
+                      if (doc.status === 'Draft' && canCreateDoc) {
                         store.setEditingDocument(doc.id);
                         store.setView('editor');
                       } else {
@@ -2185,12 +2440,41 @@ export default function Home() {
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
+                          {canCreateDoc && (
+                            <input
+                              type="checkbox"
+                              className="mt-1 rounded border-gray-300"
+                              checked={selectedDocs.has(doc.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                setSelectedDocs(prev => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(doc.id);
+                                  else next.delete(doc.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
                           <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center group-hover:bg-emerald-50 transition-colors">
                             <FileText className="w-5 h-5 text-muted-foreground" />
                           </div>
                           <div className="min-w-0">
                             <CardTitle className="text-sm font-semibold truncate">{doc.title}</CardTitle>
-                            <p className="text-xs text-muted-foreground">{formatDate(doc.createdAt)}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs text-muted-foreground">{formatDate(doc.createdAt)}</p>
+                              {doc.owner && doc.ownerRole && (
+                                <Badge variant="outline" className={`text-[9px] px-1 py-0 ${
+                                  doc.ownerRole === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                  doc.ownerRole === 'admin' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                  doc.ownerRole === 'editor' ? 'bg-green-50 text-green-700 border-green-200' :
+                                  doc.ownerRole === 'signer' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                  'bg-gray-50 text-gray-700 border-gray-200'
+                                }`}>
+                                  {doc.owner.name} · {doc.ownerRole}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -2217,30 +2501,119 @@ export default function Home() {
                           <Progress value={(doc.signedCount / doc.signerCount) * 100} className="h-1.5 w-20" />
                         </div>
                       )}
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1">
-                        {doc.status === 'Draft' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}
-                          >
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {doc.status === 'Draft' && canDeleteDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}>
                             <Trash2 className="w-3.5 h-3.5 text-destructive" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => handleDuplicateDoc(e, doc.id)}
-                          title="Duplicate document"
-                        >
-                          <CopyPlus className="w-3.5 h-3.5" />
-                        </Button>
+                        {(doc.status === 'Sent' || doc.status === 'Signing') && canSendDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Resend signing links"
+                            onClick={(e) => handleResendLinks(e, doc.id)}>
+                            <Send className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {canCreateDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Rename document"
+                            onClick={(e) => { e.stopPropagation(); setRenamingDocId(doc.id); setRenamingTitle(doc.title); }}>
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') && canCreateDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Export form data"
+                            onClick={(e) => handleExportFormData(e, doc.id, doc.title)}>
+                            <FileDown className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {canCreateDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => handleDuplicateDoc(e, doc.id)} title="Duplicate document">
+                            <CopyPlus className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {doc.organizationId && canCreateDoc && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => { e.stopPropagation(); setSharingDocId(doc.id); setSharingDocTitle(doc.title); }} title="Share document">
+                            <Share2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {doc.organizationId && canCreateDoc && folders.length > 0 && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => { e.stopPropagation(); setMovingDocId(doc.id); }} title="Move to folder">
+                            <FolderOpen className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
+                  ) : (
+                  /* List View */
+                  <div className="flex items-center gap-4 p-3 rounded-lg border bg-card hover:shadow-sm transition-shadow cursor-pointer group"
+                    onClick={() => {
+                      if (doc.status === 'Draft' && canCreateDoc) { store.setEditingDocument(doc.id); store.setView('editor'); }
+                      else { store.setViewingDocument(doc.id); store.setView('viewer'); }
+                    }}>
+                    {canCreateDoc && (
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300"
+                        checked={selectedDocs.has(doc.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          setSelectedDocs(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(doc.id);
+                            else next.delete(doc.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    <div className="w-8 h-8 bg-muted rounded flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(doc.createdAt)}</p>
+                    </div>
+                    {doc.signerCount > 0 && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Users className="w-3 h-3" /> {doc.signedCount}/{doc.signerCount}
+                      </div>
+                    )}
+                    <StatusBadge status={doc.status} />
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {(doc.status === 'Sent' || doc.status === 'Signing') && canSendDoc && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Resend"
+                          onClick={(e) => handleResendLinks(e, doc.id)}>
+                          <Send className="w-3 h-3" />
+                        </Button>
+                      )}
+                      {canCreateDoc && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Rename"
+                          onClick={(e) => { e.stopPropagation(); setRenamingDocId(doc.id); setRenamingTitle(doc.title); }}>
+                          <Edit3 className="w-3 h-3" />
+                        </Button>
+                      )}
+                      {canCreateDoc && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Duplicate"
+                          onClick={(e) => handleDuplicateDoc(e, doc.id)}>
+                          <CopyPlus className="w-3 h-3" />
+                        </Button>
+                      )}
+                      {doc.organizationId && canCreateDoc && folders.length > 0 && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Move to folder"
+                          onClick={(e) => { e.stopPropagation(); setMovingDocId(doc.id); }}>
+                          <FolderOpen className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  )}
                 </motion.div>
               ))}
             </div>
@@ -2268,10 +2641,10 @@ export default function Home() {
                 ) : (
                   <>
                     <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Click to select a PDF file</p>
+                    <p className="text-sm text-muted-foreground">Click to select a file (PDF, PNG, JPG, DOCX)</p>
                   </>
                 )}
-                <input id="pdf-upload" type="file" accept=".pdf" className="hidden" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
+                <input id="pdf-upload" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Document Title</label>
@@ -2283,6 +2656,41 @@ export default function Home() {
               <Button onClick={handleUpload} disabled={!uploadFile || uploading} className="bg-emerald-600 hover:bg-emerald-700">
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4 mr-2" /> Upload</>}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Rename Document Dialog */}
+        <Dialog open={!!renamingDocId} onOpenChange={() => setRenamingDocId(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rename Document</DialogTitle>
+            </DialogHeader>
+            <Input
+              placeholder="Enter new title..."
+              value={renamingTitle}
+              onChange={(e) => setRenamingTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renamingTitle.trim() && renamingDocId) {
+                  documentsApi.rename(renamingDocId, renamingTitle.trim()).then(() => {
+                    toast.success('Document renamed');
+                    setRenamingDocId(null);
+                    loadDocuments();
+                  }).catch(() => toast.error('Failed to rename'));
+                }
+              }}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRenamingDocId(null)}>Cancel</Button>
+              <Button onClick={async () => {
+                if (!renamingTitle.trim() || !renamingDocId) return;
+                try {
+                  await documentsApi.rename(renamingDocId, renamingTitle.trim());
+                  toast.success('Document renamed');
+                  setRenamingDocId(null);
+                  loadDocuments();
+                } catch { toast.error('Failed to rename'); }
+              }} disabled={!renamingTitle.trim()}>Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -2318,6 +2726,147 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
+        {/* Move to Folder Dialog */}
+        <Dialog open={!!movingDocId} onOpenChange={() => setMovingDocId(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-emerald-600" /> Move to Folder
+              </DialogTitle>
+              <DialogDescription>Select a folder to move this document to</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={async () => {
+                  if (!movingDocId) return;
+                  try {
+                    await documentsApi.moveToFolder(movingDocId, null);
+                    toast.success('Document moved to root');
+                    setMovingDocId(null);
+                    loadDocuments();
+                  } catch {
+                    toast.error('Failed to move document');
+                  }
+                }}
+              >
+                <FolderOpen className="w-4 h-4 mr-2" /> Root (no folder)
+              </Button>
+              {folders.map(f => (
+                <Button
+                  key={f.id}
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={async () => {
+                    if (!movingDocId) return;
+                    try {
+                      await documentsApi.moveToFolder(movingDocId, f.id);
+                      toast.success(`Document moved to "${f.name}"`);
+                      setMovingDocId(null);
+                      loadDocuments();
+                    } catch {
+                      toast.error('Failed to move document');
+                    }
+                  }}
+                >
+                  <FileText className="w-4 h-4 mr-2" /> {f.name}
+                </Button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setMovingDocId(null)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Move Dialog */}
+        <Dialog open={bulkMoveOpen} onOpenChange={setBulkMoveOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-emerald-600" /> Move {selectedDocs.size} Documents
+              </DialogTitle>
+              <DialogDescription>Select a folder to move selected documents to</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={async () => {
+                  try {
+                    await documentsApi.bulk('move', Array.from(selectedDocs), null);
+                    toast.success(`${selectedDocs.size} documents moved to root`);
+                    setSelectedDocs(new Set());
+                    setBulkMoveOpen(false);
+                    loadDocuments();
+                  } catch {
+                    toast.error('Failed to move documents');
+                  }
+                }}
+              >
+                <FolderOpen className="w-4 h-4 mr-2" /> Root (no folder)
+              </Button>
+              {folders.map(f => (
+                <Button
+                  key={f.id}
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={async () => {
+                    try {
+                      await documentsApi.bulk('move', Array.from(selectedDocs), f.id);
+                      toast.success(`${selectedDocs.size} documents moved to "${f.name}"`);
+                      setSelectedDocs(new Set());
+                      setBulkMoveOpen(false);
+                      loadDocuments();
+                    } catch {
+                      toast.error('Failed to move documents');
+                    }
+                  }}
+                >
+                  <FileText className="w-4 h-4 mr-2" /> {f.name}
+                </Button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkMoveOpen(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Delete Dialog */}
+        <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <Trash2 className="w-5 h-5" /> Delete {selectedDocs.size} Documents
+              </DialogTitle>
+              <DialogDescription>
+                This will permanently delete {selectedDocs.size} document(s). This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  try {
+                    await documentsApi.bulk('delete', Array.from(selectedDocs));
+                    toast.success(`${selectedDocs.size} documents deleted`);
+                    setSelectedDocs(new Set());
+                    setBulkDeleteOpen(false);
+                    loadDocuments();
+                  } catch {
+                    toast.error('Failed to delete documents');
+                  }
+                }}
+              >
+                Delete All
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Create Folder Dialog */}
         <Dialog open={creatingFolder} onOpenChange={setCreatingFolder}>
           <DialogContent className="max-w-sm">
@@ -2347,7 +2896,7 @@ export default function Home() {
 
         {/* Org Settings Dialog */}
         <Dialog open={store.orgSettingsOpen} onOpenChange={(open) => { if (!open) store.closeOrgSettings(); }}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-3xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-emerald-600" /> Organization Settings
@@ -2388,65 +2937,11 @@ export default function Home() {
 
                   {/* Members Tab */}
                   <TabsContent value="members" className="space-y-4">
-                    <div className="space-y-2">
-                      {orgDetail.members.map(member => {
-                        const isOwner = member.role === 'owner';
-                        const isAdmin = member.role === 'admin';
-                        const canManage = !isOwner && (orgDetail.ownerId === store.user?.id || isAdmin);
-                        return (
-                          <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                              style={{
-                                backgroundColor: isOwner ? 'rgba(5,150,105,0.15)' : 'rgba(100,100,100,0.1)',
-                                color: isOwner ? '#059669' : undefined,
-                              }}
-                            >
-                              {member.user.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm font-medium truncate">{member.user.name}</p>
-                                {isOwner && <Crown className="w-3.5 h-3.5 text-emerald-600" />}
-                              </div>
-                              <p className="text-xs text-muted-foreground truncate">{member.user.email}</p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Badge className={
-                                isOwner ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                                isAdmin ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
-                                'bg-secondary text-secondary-foreground'
-                              }>
-                                {member.role}
-                              </Badge>
-                              {canManage && (
-                                <div className="flex items-center gap-1">
-                                  <select className="text-xs border rounded px-1 py-0.5 bg-background" value={member.role} onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}>
-                                    <option value="member">Member</option>
-                                    <option value="admin">Admin</option>
-                                  </select>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleRemoveMember(member.id)}>
-                                    <X className="w-3 h-3" />
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {/* Invite */}
-                    {(orgDetail.ownerId === store.user?.id || orgDetail.members.some(m => m.user.id === store.user?.id && m.role === 'admin')) && (
-                      <div className="flex gap-2">
-                        <Input placeholder="Email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="flex-1 h-9 text-sm" onKeyDown={(e) => e.key === 'Enter' && handleInviteMember()} />
-                        <select className="border rounded-md px-2 text-xs bg-background h-9" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
-                          <option value="member">Member</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                        <Button size="sm" onClick={handleInviteMember} disabled={!inviteEmail.trim() || inviting} className="bg-emerald-600 hover:bg-emerald-700 h-9">
-                          {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                        </Button>
-                      </div>
-                    )}
+                    <TeamMemberManager
+                      orgId={store.orgSettingsOrgId || ''}
+                      currentUserId={store.user?.id || ''}
+                      currentUserRole={orgDetail.members.find(m => m.user.id === store.user?.id)?.role || 'member'}
+                    />
                     {orgDetail.ownerId === store.user?.id && (
                       <>
                         <Separator />
@@ -3108,6 +3603,15 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
+        {sharingDocId && (
+          <ShareDocumentDialog
+            open={!!sharingDocId}
+            onOpenChange={(open) => { if (!open) { setSharingDocId(null); setSharingDocTitle(''); } }}
+            documentId={sharingDocId}
+            documentTitle={sharingDocTitle}
+          />
+        )}
+
         <footer className="border-t py-3 text-center text-xs text-muted-foreground">
           OpenSign-compliant PDF Signing Platform
         </footer>
@@ -3144,6 +3648,32 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => window.print()} title="Print document">
+                <FileText className="w-4 h-4 mr-1" /> Print
+              </Button>
+              <Button size="sm" variant="outline" onClick={async () => {
+                try {
+                  const d = await documentsApi.formData(viewerDoc.id, 'csv');
+                  const csv = 'Field Name,Type,Page,Value,Signer Email,Signer Name\n' + d.fields.map(f => `"${f.fieldName}","${f.fieldType}","${f.pageNumber}","${(f.value||'').replace(/"/g,'""')}","${f.signerEmail}","${f.signerName}"`).join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${viewerDoc.title}-form-data.csv`;
+                  a.click();
+                  toast.success('Form data exported');
+                } catch { toast.error('Export failed'); }
+              }} title="Export form data as CSV">
+                <FileDown className="w-4 h-4 mr-1" /> Export
+              </Button>
+              <Button size="sm" variant="outline" onClick={async () => {
+                try {
+                  const r = await documentsApi.resend(viewerDoc.id);
+                  toast.success(`Resent to ${r.resent} signer(s)`);
+                } catch { toast.error('Failed to resend'); }
+              }} title="Resend signing links to pending signers">
+                <Send className="w-4 h-4 mr-1" /> Resend
+              </Button>
               {viewerDoc.status === 'Completed' && (
                 <>
                   <Button size="sm" variant="outline" onClick={handleDownloadCertificate} className="hidden sm:flex">

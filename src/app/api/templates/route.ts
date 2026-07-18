@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { getUserRole, hasPermission } from '@/lib/permissions';
 
 function getAuthUser(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -13,10 +14,43 @@ export async function GET(req: NextRequest) {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const templates = await db.documentTemplate.findMany({
-      where: { ownerId: payload.userId as string },
-      orderBy: { createdAt: 'desc' },
-    });
+    const userId = payload.userId as string;
+    const { searchParams } = new URL(req.url);
+    const orgId = searchParams.get('orgId');
+
+    let templates;
+
+    if (orgId) {
+      // Check org access
+      const role = await getUserRole(userId, orgId);
+      if (!role) {
+        return NextResponse.json({ error: 'Not a member' }, { status: 403 });
+      }
+
+      // Owners/admins see all, others need read permission
+      if (role !== 'owner' && role !== 'admin') {
+        const canRead = await hasPermission(userId, orgId, 'template', 'read');
+        if (!canRead) {
+          return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+        }
+      }
+
+      // Get user's own templates + org templates
+      templates = await db.documentTemplate.findMany({
+        where: {
+          OR: [
+            { ownerId: userId },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } else {
+      // Personal templates only
+      templates = await db.documentTemplate.findMany({
+        where: { ownerId: userId },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
 
     return NextResponse.json(templates);
   } catch (error) {
@@ -30,16 +64,32 @@ export async function POST(req: NextRequest) {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { name, fieldConfig } = await req.json();
+    const userId = payload.userId as string;
+    const { name, fieldConfig, orgId } = await req.json();
     if (!name || !fieldConfig) {
       return NextResponse.json({ error: 'Name and field config required' }, { status: 400 });
+    }
+
+    // If creating in org context, check create permission
+    if (orgId) {
+      const role = await getUserRole(userId, orgId);
+      if (!role) {
+        return NextResponse.json({ error: 'Not a member' }, { status: 403 });
+      }
+
+      if (role !== 'owner' && role !== 'admin') {
+        const canCreate = await hasPermission(userId, orgId, 'template', 'create');
+        if (!canCreate) {
+          return NextResponse.json({ error: 'Insufficient permissions to create templates' }, { status: 403 });
+        }
+      }
     }
 
     const template = await db.documentTemplate.create({
       data: {
         name,
         fieldConfig: JSON.stringify(fieldConfig),
-        ownerId: payload.userId as string,
+        ownerId: userId,
       },
     });
 

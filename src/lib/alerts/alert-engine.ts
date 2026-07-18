@@ -44,9 +44,9 @@ export class AlertEngine {
   }
 
   /**
-   * Send email (logs to console in test mode)
+   * Send email (logs to console in test mode) — public for resend
    */
-  private async sendEmail(options: { from: string; to: string; subject: string; html: string }): Promise<void> {
+  public async sendEmail(options: { from: string; to: string; subject: string; html: string }): Promise<void> {
     if (this.testMode) {
       console.log('\n[AlertEngine] EMAIL (TEST MODE):');
       console.log(`  To: ${options.to}`);

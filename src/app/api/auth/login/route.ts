@@ -20,6 +20,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
+    // Check if user has pending memberships that need password setup
+    const pendingMemberships = await db.organizationMember.findMany({
+      where: { userId: user.id, inviteStatus: 'pending' },
+    });
+
+    if (pendingMemberships.length > 0) {
+      return NextResponse.json({
+        requiresPasswordSetup: true,
+        message: 'Please set your password first',
+        user: { id: user.id, email: user.email, name: user.name },
+      }, { status: 200 });
+    }
+
+    // Update lastLoginAt for all active memberships
+    await db.organizationMember.updateMany({
+      where: { userId: user.id, inviteStatus: 'active' },
+      data: { lastLoginAt: new Date() },
+    });
+
     const token = generateToken({ userId: user.id, email: user.email });
 
     return NextResponse.json({

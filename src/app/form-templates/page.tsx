@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Plus, ArrowLeft, Loader2 } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Share2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { ShareTemplateDialog } from '@/components/permissions/share-template-dialog';
 
 interface FormTemplate {
   id: string;
@@ -36,6 +37,8 @@ export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
   const [currentFields, setCurrentFields] = useState<FormFieldData[]>([]);
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
+  const [sharingTemplateId, setSharingTemplateId] = useState<string | null>(null);
+  const [sharingTemplateName, setSharingTemplateName] = useState('');
   const { toast } = useToast();
 
   // Fetch templates
@@ -278,6 +281,13 @@ export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={() => { setSharingTemplateId(template.id); setSharingTemplateName(template.name); }}
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="text-red-500 hover:text-red-700"
                       onClick={() => handleDelete(template.id)}
                     >
@@ -289,6 +299,15 @@ export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
             </Card>
           ))}
         </div>
+      )}
+
+      {sharingTemplateId && (
+        <ShareTemplateDialog
+          open={!!sharingTemplateId}
+          onOpenChange={(open) => { if (!open) { setSharingTemplateId(null); setSharingTemplateName(''); } }}
+          templateId={sharingTemplateId}
+          templateName={sharingTemplateName}
+        />
       )}
     </div>
   );

@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyToken, generateSignerToken } from '@/lib/auth';
-import path from 'path';
-import { readFile, writeFile, copyFile } from 'fs/promises';
-import { PDFDocument } from 'pdf-lib';
-import { randomUUID } from 'crypto';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+import { getUserRole, hasPermission } from '@/lib/permissions';
 
 function getAuthUser(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -20,21 +15,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
+    const userId = payload.userId as string;
+
     const doc = await db.document.findFirst({
-      where: { id, ownerId: payload.userId as string },
+      where: { id },
       include: { fields: true },
     });
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+
+    // Check access
+    let hasAccess = doc.ownerId === userId;
+    if (!hasAccess && doc.organizationId) {
+      const role = await getUserRole(userId, doc.organizationId);
+      if (role === 'owner' || role === 'admin') {
+        hasAccess = true;
+      } else {
+        hasAccess = await hasPermission(userId, doc.organizationId, 'document', 'update');
+      }
+    }
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+
     if (doc.status !== 'Draft') {
       return NextResponse.json({ error: 'Can only sign Draft documents' }, { status: 400 });
     }
 
-    // Create a signer for the owner
+    // Create a signer for the current user
     const token = generateSignerToken();
     const signer = await db.signer.create({
       data: {
-        email: '', // Self-signed
-        name: 'Self (Owner)',
+        email: '',
+        name: 'Self',
         order: 1,
         token,
         documentId: id,
@@ -57,8 +69,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: {
         action: 'SELF_SIGN_STARTED',
         documentId: id,
-        userId: payload.userId as string,
-        details: 'Owner started self-signing',
+        userId,
+        details: 'User started self-signing',
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
         userAgent: req.headers.get('user-agent') || null,
       },

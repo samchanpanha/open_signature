@@ -31,17 +31,24 @@ model Organization {
   apiKeys   ApiKey[]
   folders   Folder[]
   usageStats UsageStat[]
+  permissionTemplates PermissionTemplate[]
 }
 
 model OrganizationMember {
-  id        String   @id @default(cuid())
-  role      String   @default("member") // owner, admin, member
-  joinedAt  DateTime @default(now())
-  userId    String
-  orgId     String
+  id            String    @id @default(cuid())
+  role          String    @default("member") // owner, admin, editor, signer, viewer, member
+  inviteStatus  String    @default("active") // pending, active, rejected
+  invitedBy     String?
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  joinedAt      DateTime  @default(now())
+  userId        String
+  orgId         String
 
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  inviter User?       @relation("InvitedBy", fields: [invitedBy], references: [id])
 
   @@unique([userId, orgId])
 }
@@ -65,7 +72,9 @@ model User {
   savedSignatures  SavedSignature[]
   ownedOrgs        Organization[]       @relation("OrgOwner")
   organizationMembers OrganizationMember[]
+  invitedMembers   OrganizationMember[] @relation("InvitedBy")
   permissions      Permission[]
+  grantedPermissions Permission[] @relation("GrantedPermissions")
   assignments      Assignment[]
   assignedDocs     Assignment[]       @relation("AssignedBy")
   notifications    Notification[]
@@ -114,6 +123,7 @@ model Document {
   notifications Notification[]
   reminders     Reminder[]
   downloadLinks DownloadLink[]
+  permissions   Permission[]
 }
 
 model DocumentTemplate {
@@ -207,19 +217,40 @@ model AuditLog {
 }
 
 model Permission {
-  id        String   @id @default(cuid())
-  resource  String   // e.g., "document", "template", "report"
-  action    String   // e.g., "create", "read", "update", "delete"
-  granted   Boolean  @default(true)
-  userId    String
-  orgId     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String    @id @default(cuid())
+  resource   String    // e.g., "document", "template", "report"
+  action     String    // e.g., "create", "read", "update", "delete"
+  granted    Boolean   @default(true)
+  userId     String
+  orgId      String?
+  documentId String?
+  templateId String?
+  grantedBy  String?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org      Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document Document?     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  template FormTemplate? @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  grantor  User?         @relation("GrantedPermissions", fields: [grantedBy], references: [id], onDelete: SetNull)
 
   @@unique([userId, orgId, resource, action])
+  @@unique([userId, documentId, action])
+  @@unique([userId, templateId, action])
+}
+
+model PermissionTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  orgId       String
+  permissions String   // JSON array of permission objects
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 model FormTemplate {
@@ -232,9 +263,10 @@ model FormTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  creator User        @relation(fields: [createdBy], references: [id])
-  fields FormField[]
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator     User         @relation(fields: [createdBy], references: [id])
+  fields      FormField[]
+  permissions Permission[]
 }
 
 model FormField {

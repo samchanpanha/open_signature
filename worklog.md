@@ -141,3 +141,61 @@ Stage Summary:
 - Field deletion via both hover X button and edit dialog
 - Document scoping by organization working
 - All existing features (auth, dashboard, editor, viewer, signing) preserved and working
+
+---
+
+Task ID: 5
+Agent: main
+Task: Sub-member management with password login, granular permissions, and document filtering
+
+Work Log:
+- Updated Prisma schema: added inviteStatus, invitedBy, isActive, lastLoginAt to OrganizationMember; added documentId, templateId, grantedBy, expiresAt to Permission; added reverse relations on Document, FormTemplate, User
+- Created invite API (POST /api/organizations/[id]/members) with auto-user creation and temp password generation
+- Created password setup API (POST /api/auth/setup-password) with /setup-password page
+- Updated login API to return requiresPasswordSetup for pending members
+- Added role presets in src/lib/permissions.ts with 6 roles: owner, admin, editor, signer, viewer, member
+- Created src/lib/document-access.ts with helpers for document/template access control
+- Created batch permissions API (POST /api/permissions/batch) for role presets
+- Created bulk permissions API (POST /api/permissions/bulk) for setting multiple permissions
+- Updated document listing/detail/rename/send/duplicate/sign-self/revoke/sign APIs with permission checks
+- Updated templates API with permission checks
+- Updated hasPermission() to filter out expired permissions
+- Created TeamMemberManager component with 7 tabs: All, Pending, Roles, Permissions, Templates, Expiring, Activity
+- Updated main page.tsx: permission-aware UI buttons, role badges on documents
+- Document sharing: GET/POST/DELETE /api/documents/[id]/permissions
+- Template sharing: GET/POST/DELETE /api/templates/[id]/permissions
+- User permissions overview: GET /api/users/[id]/permissions
+- Revoke all user permissions: POST /api/users/[id]/permissions/revoke-all
+- Org-wide permissions overview: GET /api/organizations/[id]/permissions
+- Permissions CSV export: GET /api/organizations/[id]/permissions/export
+- Expiring permissions alert: GET /api/permissions/expiring
+- Permission expiration extension: POST /api/permissions/[id]/extend
+- Invite notification with email: POST /api/organizations/[id]/members/[memberId]/invite
+- Activity log: GET /api/organizations/[id]/activity
+- Permission audit logging for all grant/revoke/extend operations
+- Role badges next to owner names (color-coded by role)
+- Created PermissionTemplate model and CRUD API
+- Permission templates UI in TeamMemberManager Templates tab
+- Apply template dialog with member selector dropdown
+- Permission change history: GET /api/organizations/[id]/permissions/history
+- Folder navigation: documents filtered by currentFolderId
+- Move document to folder: PATCH /api/documents/[id] with folderId
+- Bulk document operations: POST /api/documents/bulk (move, delete)
+- Bulk select UI with checkboxes on document cards
+- Folder rename via double-click on folder tab
+- Fixed bug: users/[id]/permissions API used wrong Prisma relation name (organization -> org) and wrong FormTemplate field (organizationId -> orgId)
+
+Database Migrations:
+- 20260718154129_add_submember_fields
+- 20260718172208_add_permission_fields
+- 20260718180832_add_permission_templates
+
+Stage Summary:
+- Complete sub-member management system with password login
+- Granular permission system with 6 roles, document/template access control, expiration
+- Permission templates for reusable permission sets
+- Document organization with folders, bulk operations
+- All APIs verified working via E2E test (invite -> setup password -> login -> permission checks)
+- Build passes cleanly (npx next build)
+
+---

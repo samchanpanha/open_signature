@@ -10,8 +10,69 @@ export interface AuthUser {
 
 export interface PermissionCheck {
   resource: string;
-  action: 'create' | 'read' | 'update' | 'delete';
+  action: 'create' | 'read' | 'update' | 'delete' | 'sign';
 }
+
+// Role presets: what permissions each role gets by default
+export const ROLE_PRESETS: Record<string, { label: string; description: string; permissions: PermissionCheck[] }> = {
+  owner: {
+    label: 'Owner',
+    description: 'Full control over the organization',
+    permissions: [], // bypasses all checks
+  },
+  admin: {
+    label: 'Admin',
+    description: 'Can manage members and all resources',
+    permissions: [], // bypasses all checks
+  },
+  editor: {
+    label: 'Editor',
+    description: 'Can create, edit, and send documents and templates',
+    permissions: [
+      { resource: 'document', action: 'create' },
+      { resource: 'document', action: 'read' },
+      { resource: 'document', action: 'update' },
+      { resource: 'document', action: 'delete' },
+      { resource: 'template', action: 'create' },
+      { resource: 'template', action: 'read' },
+      { resource: 'template', action: 'update' },
+      { resource: 'template', action: 'delete' },
+      { resource: 'form', action: 'create' },
+      { resource: 'form', action: 'read' },
+      { resource: 'form', action: 'update' },
+      { resource: 'report', action: 'read' },
+    ],
+  },
+  signer: {
+    label: 'Signer',
+    description: 'Can view and sign documents assigned to them',
+    permissions: [
+      { resource: 'document', action: 'read' },
+      { resource: 'document', action: 'sign' },
+      { resource: 'template', action: 'read' },
+    ],
+  },
+  viewer: {
+    label: 'Viewer',
+    description: 'Read-only access to documents and templates',
+    permissions: [
+      { resource: 'document', action: 'read' },
+      { resource: 'template', action: 'read' },
+      { resource: 'report', action: 'read' },
+    ],
+  },
+  member: {
+    label: 'Member',
+    description: 'Basic member with limited access',
+    permissions: [
+      { resource: 'document', action: 'read' },
+      { resource: 'template', action: 'read' },
+    ],
+  },
+};
+
+export const ALL_ROLES = ['owner', 'admin', 'editor', 'signer', 'viewer', 'member'];
+export const MANAGEABLE_ROLES = ['admin', 'editor', 'signer', 'viewer', 'member'];
 
 /**
  * Extract authenticated user from request
@@ -63,6 +124,10 @@ export async function hasPermission(
       resource,
       action,
       granted: true,
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
     },
   });
 
@@ -106,7 +171,7 @@ export async function hasAllPermissions(
  */
 export function requirePermission(
   resource: string,
-  action: 'create' | 'read' | 'update' | 'delete'
+  action: 'create' | 'read' | 'update' | 'delete' | 'sign'
 ) {
   return async (req: NextRequest): Promise<NextResponse | null> => {
     const user = getAuthUser(req);
@@ -183,7 +248,7 @@ export function withAuth<T extends NextRequest>(
  */
 export function withPermission(
   resource: string,
-  action: 'create' | 'read' | 'update' | 'delete',
+  action: 'create' | 'read' | 'update' | 'delete' | 'sign',
   handler: (req: NextRequest, user: AuthUser) => Promise<NextResponse>
 ) {
   return async (req: NextRequest): Promise<NextResponse> => {

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { verifyToken, generateSignerToken } from '@/lib/auth';
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
+import { getUserRole, hasPermission } from '@/lib/permissions';
 
 function getAuthUser(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
+    const userId = payload.userId as string;
     const { signers: signerData, fieldAssignments, ccRecipients, expiresAt, expiresInDays, templateId, workflowId, currentStepIndex } = await req.json();
 
     if (!signerData || signerData.length === 0) {
@@ -26,9 +28,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const document = await db.document.findFirst({
-      where: { id, ownerId: payload.userId as string },
+      where: { id },
     });
     if (!document) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+
+    // Check access
+    let hasAccess = document.ownerId === userId;
+    if (!hasAccess && document.organizationId) {
+      const role = await getUserRole(userId, document.organizationId);
+      if (role === 'owner' || role === 'admin') {
+        hasAccess = true;
+      } else {
+        hasAccess = await hasPermission(userId, document.organizationId, 'document', 'update');
+      }
+    }
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
     if (document.status !== 'Draft') {
       return NextResponse.json({ error: `Document is ${document.status}, cannot send` }, { status: 400 });
     }

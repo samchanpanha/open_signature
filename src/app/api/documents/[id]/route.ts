@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 import { readFile, unlink } from 'fs/promises';
 import path from 'path';
+import { getUserRole, hasPermission } from '@/lib/permissions';
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
@@ -12,14 +13,51 @@ function getAuthUser(req: NextRequest) {
   return verifyToken(authHeader.slice(7));
 }
 
+async function checkDocumentAccess(userId: string, documentId: string, action: 'read' | 'update' | 'delete' = 'read') {
+  const document = await db.document.findUnique({
+    where: { id: documentId },
+    select: { ownerId: true, organizationId: true },
+  });
+
+  if (!document) return { allowed: false, document: null };
+
+  // Owner always has access
+  if (document.ownerId === userId) {
+    return { allowed: true, document };
+  }
+
+  // If no org, only owner can access
+  if (!document.organizationId) {
+    return { allowed: false, document };
+  }
+
+  const role = await getUserRole(userId, document.organizationId);
+  if (!role) return { allowed: false, document };
+
+  // Owners and admins bypass permission checks
+  if (role === 'owner' || role === 'admin') {
+    return { allowed: true, document };
+  }
+
+  const canDo = await hasPermission(userId, document.organizationId, 'document', action);
+  return { allowed: canDo, document };
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = getAuthUser(req);
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
-    const document = await db.document.findFirst({
-      where: { id, ownerId: payload.userId as string },
+    const userId = payload.userId as string;
+
+    const { allowed, document } = await checkDocumentAccess(userId, id, 'read');
+    if (!allowed || !document) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+
+    const fullDocument = await db.document.findFirst({
+      where: { id },
       include: {
         signers: { orderBy: { order: 'asc' } },
         fields: { orderBy: { pageNumber: 'asc' } },
@@ -28,24 +66,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             steps: { include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { order: 'asc' } },
           },
         },
+        owner: { select: { id: true, name: true, email: true } },
       },
     });
 
-    if (!document) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    if (!fullDocument) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
     return NextResponse.json({
-      id: document.id,
-      title: document.title,
-      status: document.status,
-      createdAt: document.createdAt,
-      originalPdfPath: document.originalPdfPath,
-      signedPdfPath: document.signedPdfPath,
-      ownerId: document.ownerId,
-      workflowId: document.workflowId,
-      workflow: document.workflow ? {
-        id: document.workflow.id,
-        name: document.workflow.name,
-        steps: document.workflow.steps.map(s => ({
+      id: fullDocument.id,
+      title: fullDocument.title,
+      status: fullDocument.status,
+      createdAt: fullDocument.createdAt,
+      originalPdfPath: fullDocument.originalPdfPath,
+      signedPdfPath: fullDocument.signedPdfPath,
+      ownerId: fullDocument.ownerId,
+      organizationId: fullDocument.organizationId,
+      owner: fullDocument.owner,
+      workflowId: fullDocument.workflowId,
+      workflow: fullDocument.workflow ? {
+        id: fullDocument.workflow.id,
+        name: fullDocument.workflow.name,
+        steps: fullDocument.workflow.steps.map(s => ({
           id: s.id,
           name: s.name,
           order: s.order,
@@ -53,7 +94,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           user: s.user,
         })),
       } : null,
-      signers: document.signers.map((s) => ({
+      signers: fullDocument.signers.map((s) => ({
         id: s.id,
         email: s.email,
         name: s.name,
@@ -61,7 +102,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         signedAt: s.signedAt,
         token: s.token,
       })),
-      fields: document.fields.map((f) => ({
+      fields: fullDocument.fields.map((f) => ({
         id: f.id,
         type: f.type,
         label: f.label,
@@ -88,11 +129,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
-    const document = await db.document.findFirst({
-      where: { id, ownerId: payload.userId as string },
-    });
+    const userId = payload.userId as string;
 
-    if (!document) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    const { allowed, document } = await checkDocumentAccess(userId, id, 'delete');
+    if (!allowed || !document) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
 
     // Clean up files
     try {
@@ -110,5 +152,33 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   } catch (error) {
     console.error('Delete document error:', error);
     return NextResponse.json({ error: 'Failed to delete document' }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const payload = getAuthUser(req);
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { id } = await params;
+    const userId = payload.userId as string;
+
+    const { allowed, document } = await checkDocumentAccess(userId, id, 'update');
+    if (!allowed || !document) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
+
+    const body = await req.json();
+    const { folderId } = body;
+
+    const updated = await db.document.update({
+      where: { id },
+      data: { folderId: folderId || null },
+    });
+
+    return NextResponse.json({ document: updated });
+  } catch (error) {
+    console.error('Update document error:', error);
+    return NextResponse.json({ error: 'Failed to update document' }, { status: 500 });
   }
 }

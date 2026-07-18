@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { getUserRole, hasPermission } from '@/lib/permissions';
 import path from 'path';
-import { readFile, writeFile, copyFile } from 'fs/promises';
+import { copyFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
@@ -19,23 +20,39 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
+    const userId = payload.userId as string;
+
     const original = await db.document.findFirst({
-      where: { id, ownerId: payload.userId as string },
+      where: { id },
       include: { fields: true },
     });
     if (!original) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+
+    // Check access
+    let hasAccess = original.ownerId === userId;
+    if (!hasAccess && original.organizationId) {
+      const role = await getUserRole(userId, original.organizationId);
+      if (role === 'owner' || role === 'admin') {
+        hasAccess = true;
+      } else {
+        hasAccess = await hasPermission(userId, original.organizationId, 'document', 'read');
+      }
+    }
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+    }
 
     // Copy the PDF file
     const newFileId = randomUUID();
     const newPdfPath = `${newFileId}.pdf`;
     await copyFile(path.join(UPLOADS_DIR, original.originalPdfPath), path.join(UPLOADS_DIR, newPdfPath));
 
-    // Create duplicated document
+    // Create duplicated document (owned by current user)
     const duplicated = await db.document.create({
       data: {
         title: `${original.title} (Copy)`,
         originalPdfPath: newPdfPath,
-        ownerId: payload.userId as string,
+        ownerId: userId,
         status: 'Draft',
       },
     });
@@ -61,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: {
         action: 'DOCUMENT_DUPLICATED',
         documentId: duplicated.id,
-        userId: payload.userId as string,
+        userId,
         details: `Duplicated from "${original.title}"`,
         ipAddress: req.headers.get('x-forwarded-for') || 'unknown',
       },
