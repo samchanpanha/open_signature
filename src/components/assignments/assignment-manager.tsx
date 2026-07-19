@@ -89,6 +89,10 @@ export function AssignmentManager({ orgId }: AssignmentManagerProps) {
   async function fetchAssignments() {
     try {
       const res = await fetch(`/api/assignments?orgId=${orgId}`);
+      if (!res.ok) {
+        console.error('Failed to fetch assignments:', res.statusText);
+        return;
+      }
       const data = await res.json();
       setAssignments(data.assignments || []);
     } catch (error) {
@@ -101,6 +105,10 @@ export function AssignmentManager({ orgId }: AssignmentManagerProps) {
   async function fetchUsers() {
     try {
       const res = await fetch(`/api/users?orgId=${orgId}`);
+      if (!res.ok) {
+        console.error('Failed to fetch users:', res.statusText);
+        return;
+      }
       const data = await res.json();
       setUsers(data.users || []);
     } catch (error) {
@@ -111,6 +119,10 @@ export function AssignmentManager({ orgId }: AssignmentManagerProps) {
   async function fetchDocuments() {
     try {
       const res = await fetch(`/api/documents?orgId=${orgId}`);
+      if (!res.ok) {
+        console.error('Failed to fetch documents:', res.statusText);
+        return;
+      }
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch (error) {

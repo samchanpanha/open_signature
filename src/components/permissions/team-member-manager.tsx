@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UserPlus, MoreVertical, Shield, Users, Trash2, Edit, Copy, Eye, Mail, Clock, CheckCircle, XCircle, AlertCircle, Activity, FileText, Download } from 'lucide-react';
+import { UserPlus, MoreVertical, Shield, Users, Trash2, Edit, Copy, Eye, Mail, Clock, CheckCircle, XCircle, AlertCircle, Activity, FileText, Download, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { orgApi, permissionsApi, activityApi, documentsApi, userPermissionsApi, expiringPermissionsApi, permissionExtensionApi, orgPermissionsApi, documentPermissionsApi, templatePermissionsApi, permissionTemplatesApi, type OrgMember, type ActivityLogEntry, type UserDocumentPermission, type UserTemplatePermission, type ExpiringPermission, type OrgPermission, type PermissionHistoryEntry, type PermissionTemplate } from '@/lib/api';
 
@@ -210,7 +210,7 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
     setMemberDocsDialogOpen(true);
     setMemberDocsLoading(true);
     try {
-      const docs = await documentsApi.list({ orgId });
+      const docs = await documentsApi.list(orgId);
       setMemberDocs(docs.map(d => ({ id: d.id, title: d.title, status: d.status })));
     } catch {
       setMemberDocs([]);
@@ -440,7 +440,7 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm">{member.invitedAt ? new Date(member.invitedAt).toLocaleDateString() : '-'}</span>
+                          <span className="text-sm">{member.createdAt ? new Date(member.createdAt).toLocaleDateString() : '-'}</span>
                         </TableCell>
                         <TableCell>
                           {canManage && (
@@ -685,9 +685,9 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                                   try {
                                     await permissionTemplatesApi.delete(orgId, template.id);
                                     setPermTemplates(prev => prev.filter(t => t.id !== template.id));
-                                    toast({ title: 'Template deleted' });
+                                    toast.success('Template deleted');
                                   } catch (error) {
-                                    toast({ title: 'Failed to delete template', variant: 'destructive' });
+                                    toast.error('Failed to delete template');
                                   }
                                 }
                               }}
@@ -784,7 +784,7 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                         <Button
                           onClick={async () => {
                             if (!templateName || templatePermissions.length === 0) {
-                              toast({ title: 'Name and permissions required', variant: 'destructive' });
+                              toast.error('Name and permissions required');
                               return;
                             }
                             try {
@@ -798,9 +798,9 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                               setTemplateName('');
                               setTemplateDescription('');
                               setTemplatePermissions([]);
-                              toast({ title: 'Template created' });
+                              toast.success('Template created');
                             } catch (error) {
-                              toast({ title: 'Failed to create template', variant: 'destructive' });
+                              toast.error('Failed to create template');
                             }
                           }}
                         >
@@ -1142,10 +1142,10 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                   await permissionTemplatesApi.apply(orgId, applyTemplateId, applyTemplateMemberId);
                   const template = permTemplates.find(t => t.id === applyTemplateId);
                   const perms = JSON.parse(template?.permissions || '[]');
-                  toast({ title: 'Template applied', description: `${perms.length} permissions applied` });
+                  toast.success(`Template applied - ${perms.length} permissions applied`);
                   setApplyTemplateId(null);
                 } catch (error) {
-                  toast({ title: 'Failed to apply template', variant: 'destructive' });
+                  toast.error('Failed to apply template');
                 } finally {
                   setApplyingTemplate(null);
                 }

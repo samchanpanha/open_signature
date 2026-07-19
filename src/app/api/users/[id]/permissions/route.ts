@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // GET /api/users/[id]/permissions - Get all permissions for a user
 export async function GET(

@@ -117,42 +117,58 @@ export function OrganizationAssignment({ orgId }: OrganizationAssignmentProps) {
   };
 
   const loadMembers = async () => {
-    const res = await fetch(`/api/organizations/${orgId}/members`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setMembers(data);
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/members`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data);
+      }
+    } catch (error) {
+      console.error('Failed to load members:', error);
     }
   };
 
   const loadAssignments = async () => {
-    const res = await fetch(`/api/organizations/${orgId}/assignments`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setAssignments(data);
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/assignments`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAssignments(data);
+      }
+    } catch (error) {
+      console.error('Failed to load assignments:', error);
     }
   };
 
   const loadTemplates = async () => {
-    const res = await fetch(`/api/organizations/${orgId}/templates`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setTemplates(data);
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/templates`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTemplates(data);
+      }
+    } catch (error) {
+      console.error('Failed to load templates:', error);
     }
   };
 
   const loadDocuments = async () => {
-    const res = await fetch(`/api/documents?organizationId=${orgId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setDocuments(data);
+    try {
+      const res = await fetch(`/api/documents?organizationId=${orgId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(data);
+      }
+    } catch (error) {
+      console.error('Failed to load documents:', error);
     }
   };
 
@@ -477,7 +493,7 @@ export function OrganizationAssignment({ orgId }: OrganizationAssignmentProps) {
               <div className="text-sm text-muted-foreground">
                 Create reusable form templates for your organization
               </div>
-              <Dialog open={templateDialogOpen} onValueChange={setTemplateDialogOpen}>
+              <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
                 <DialogTrigger asChild>
                   <Button>
                     <Plus className="w-4 h-4 mr-2" />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword, generateToken } from '@/lib/auth';
+import { isValidEmail, sanitizeString } from '@/lib/validation';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,18 +10,30 @@ export async function POST(req: NextRequest) {
     if (!email || !name || !password) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
+
+    const sanitizedEmail = email.toLowerCase().trim();
+    const sanitizedName = sanitizeString(name, 100);
+
+    if (!isValidEmail(sanitizedEmail)) {
+      return NextResponse.json({ error: 'Invalid email format' }, { status: 400 });
+    }
+
     if (password.length < 6) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
-    const existing = await db.user.findUnique({ where: { email } });
+    if (password.length > 128) {
+      return NextResponse.json({ error: 'Password must be less than 128 characters' }, { status: 400 });
+    }
+
+    const existing = await db.user.findUnique({ where: { email: sanitizedEmail } });
     if (existing) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     const hashedPassword = await hashPassword(password);
     const user = await db.user.create({
-      data: { email, name, password: hashedPassword },
+      data: { email: sanitizedEmail, name: sanitizedName, password: hashedPassword },
     });
 
     const token = generateToken({ userId: user.id, email: user.email });

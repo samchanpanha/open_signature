@@ -9,7 +9,7 @@ import {
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
   GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle,
-  Share2, FolderOpen
+  Share2, FolderOpen, FileEdit, History, Bell, GitCompareArrows, Mail
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,13 +18,37 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import OnboardingTour from '@/components/onboarding-tour';
+import { ContactAutocomplete } from '@/components/contact-autocomplete';
 import { TeamMemberManager } from '@/components/permissions/team-member-manager';
 import { ShareDocumentDialog } from '@/components/permissions/share-document-dialog';
+import { ShareTemplateDialog } from '@/components/permissions/share-template-dialog';
+import { BulkSendDialog } from '@/components/bulk-send-dialog';
+import { AuditTimeline } from '@/components/audit-timeline';
+import { DocumentComments } from '@/components/document-comments';
+import { DocumentPreviewDialog } from '@/components/document-preview-dialog';
+import { KeyboardShortcuts } from '@/components/keyboard-shortcuts';
+import { DashboardAnalytics } from '@/components/dashboard-analytics';
+import { ActivityFeed } from '@/components/activity-feed';
+import { OnboardingChecklist } from '@/components/onboarding-checklist';
+import { DocumentActionsMenu } from '@/components/document-actions-menu';
+import { AvatarUpload } from '@/components/avatar-upload';
+import { DocumentComparison } from '@/components/document-comparison';
+import { DocumentReminders } from '@/components/document-reminders';
+import { ExpiryWarnings } from '@/components/expiry-warnings';
+import { WebhookManager } from '@/components/webhook-manager';
+import { DashboardSkeleton } from '@/components/dashboard-skeleton';
+import { DocumentSkeleton } from '@/components/document-skeleton';
+import { Skeleton } from '@/components/ui/skeleton';
+import { BatchOperations } from '@/components/batch-operations';
+import { NotificationBadge } from '@/components/notification-badge';
+import { DocumentStatusBadge } from '@/components/document-status-badge';
+import { QuickShareDialog } from '@/components/quick-share-dialog';
+import { VersionDiff } from '@/components/version-diff';
+import { SigningOrder } from '@/components/signing-order';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, bulkSendApi, passwordApi, downloadLinkApi, analyticsApi, brandingApi, profileApi, onboardingApi, type OrgListItem, type OrgMember, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, type OrgListItem, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -97,16 +121,7 @@ const STATUS_TABS = ['All', 'Draft', 'Sent', 'Signing', 'Completed', 'Rejected',
 
 // ============ HELPER COMPONENTS ============
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, string> = {
-    Draft: 'bg-secondary text-secondary-foreground',
-    Sent: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-    Signing: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-    Completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-    Rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-    Expired: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-    Revoked: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
-  };
-  return <Badge className={variants[status] || ''}>{status}</Badge>;
+  return <DocumentStatusBadge status={status} />;
 }
 
 function formatDate(dateStr: string) {
@@ -124,7 +139,7 @@ function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
-      className="h-8 w-8"
+      className="h-10 w-10"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
     >
@@ -295,6 +310,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState('');
   const [authName, setAuthName] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authErrors, setAuthErrors] = useState<{ email?: string; password?: string; name?: string }>({});
 
   // Dashboard
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
@@ -331,7 +347,7 @@ export default function Home() {
   const [pdfPages, setPdfPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [placedFields, setPlacedFields] = useState<PlacedField[]>([]);
-  const [activeTool, setActiveTool] = useState<'signature' | 'date' | 'text' | null>(null);
+  const [activeTool, setActiveTool] = useState<'signature' | 'date' | 'text' | 'dropdown' | 'checkbox' | null>(null);
   const [activeSignerId, setActiveSignerId] = useState<string | null>(null);
   const [tempSigners, setTempSigners] = useState<TempSigner[]>([]);
   const [newSignerName, setNewSignerName] = useState('');
@@ -342,13 +358,14 @@ export default function Home() {
   const [ccRecipients, setCcRecipients] = useState<CcRecipient[]>([]);
   const [newCcName, setNewCcName] = useState('');
   const [newCcEmail, setNewCcEmail] = useState('');
+  const [previewSend, setPreviewSend] = useState(false);
   const [saveTemplateName, setSaveTemplateName] = useState('');
   const [saveTemplateDialog, setSaveTemplateDialog] = useState(false);
 
   // Workflows
   const [availableWorkflows, setAvailableWorkflows] = useState<import('@/lib/api').WorkflowListItem[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
-
+  const [signerOrders, setSignerOrders] = useState<{ id: string; order: number }[]>([]);
   // Drag-to-move
   const [draggingField, setDraggingField] = useState<string | null>(null);
   const [dragStartPos, setDragStartPos] = useState<{ mouseX: number; mouseY: number; fieldX: number; fieldY: number; pageRect: DOMRect } | null>(null);
@@ -380,6 +397,11 @@ export default function Home() {
   const [showReminders, setShowReminders] = useState(false);
   const [newReminderDate, setNewReminderDate] = useState('');
   const [newReminderMsg, setNewReminderMsg] = useState('');
+  const [docVersions, setDocVersions] = useState<any[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  const [quickShareOpen, setQuickShareOpen] = useState(false);
+  const [versionDiffOpen, setVersionDiffOpen] = useState(false);
 
   // Signing
   const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } } | null>(null);
@@ -394,6 +416,13 @@ export default function Home() {
   const [rejecting, setRejecting] = useState(false);
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
   const [savedSigsLoading, setSavedSigsLoading] = useState(false);
+  const [signingZoom, setSigningZoom] = useState(1);
+
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+
+  // Viewer zoom
+  const [viewerZoom, setViewerZoom] = useState(1);
 
   // OTP Verification
   const [otpStep, setOtpStep] = useState(false);
@@ -403,7 +432,6 @@ export default function Home() {
 
   // Contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [showContactsPicker, setShowContactsPicker] = useState(false);
 
   // Folders
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -425,9 +453,26 @@ export default function Home() {
   const [renamingTitle, setRenamingTitle] = useState('');
   const [sharingDocId, setSharingDocId] = useState<string | null>(null);
   const [sharingDocTitle, setSharingDocTitle] = useState('');
+  const [sharingTemplateId, setSharingTemplateId] = useState<string | null>(null);
+  const [sharingTemplateName, setSharingTemplateName] = useState('');
   const [movingDocId, setMovingDocId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renamingFolderName, setRenamingFolderName] = useState('');
+  const [bulkSendOpen, setBulkSendOpen] = useState(false);
+
+  // Notification Preferences
+  const [showNotifPrefs, setShowNotifPrefs] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState({
+    emailOnSent: true,
+    emailOnCompleted: true,
+    emailOnRejected: true,
+    emailOnExpiring: true,
+    emailOnReminder: true,
+  });
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
+
+  // Keyboard shortcuts
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Org Settings Tabs
   const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates'>('members');
@@ -435,10 +480,30 @@ export default function Home() {
   const [orgEmailTemplates, setOrgEmailTemplates] = useState<EmailTemplate[]>([]);
   const [orgApiKeys, setOrgApiKeys] = useState<ApiKey[]>([]);
 
+  // Email Preview State
+  const [previewEmailTemplate, setPreviewEmailTemplate] = useState<any>(null);
+  const [emailPreviewHtml, setEmailPreviewHtml] = useState('');
+  const [emailPreviewSubject, setEmailPreviewSubject] = useState('');
+  const [emailPreviewLoading, setEmailPreviewLoading] = useState(false);
+
   // Keep placedFields ref in sync
   useEffect(() => {
     placedFieldsRef.current = placedFields;
   }, [placedFields]);
+
+  // Keyboard shortcuts listener
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        setShowShortcuts(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // ============ INIT ============
   useEffect(() => {
@@ -456,6 +521,7 @@ export default function Home() {
       authApi.me().then((user) => {
         store.setAuth(user, token);
         store.setView('dashboard');
+        if ((user as any).avatarUrl) setAvatarUrl((user as any).avatarUrl);
       }).catch(() => {
         localStorage.removeItem('token');
       });
@@ -464,18 +530,27 @@ export default function Home() {
 
   // ============ AUTH HANDLERS ============
   const handleAuth = async () => {
-    if (authMode === 'register' && (!authEmail || !authName || !authPassword)) {
-      toast.error('Please fill all fields');
-      return;
+    const errors: { email?: string; password?: string; name?: string } = {};
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!authEmail) {
+      errors.email = 'Email is required';
+    } else if (!emailRegex.test(authEmail)) {
+      errors.email = 'Invalid email format';
     }
-    if (authMode === 'login' && (!authEmail || !authPassword)) {
-      toast.error('Please fill all fields');
-      return;
+
+    if (!authPassword) {
+      errors.password = 'Password is required';
+    } else if (authPassword.length < 6) {
+      errors.password = 'Password must be at least 6 characters';
     }
-    if (authPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
+
+    if (authMode === 'register' && !authName) {
+      errors.name = 'Name is required';
     }
+
+    setAuthErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     setAuthLoading(true);
     try {
@@ -899,7 +974,10 @@ export default function Home() {
   }, [store.editingDocumentId]);
 
   useEffect(() => {
-    if (store.currentView === 'editor') loadEditor();
+    if (store.currentView === 'editor') {
+      loadEditor();
+      contactsApi.list().then(setContacts).catch(() => {});
+    }
   }, [store.currentView, loadEditor]);
 
   const addSigner = () => {
@@ -1104,7 +1182,6 @@ export default function Home() {
         width: editFieldWidth,
         height: editFieldHeight,
         signerId: editFieldSignerId,
-        options: parsedOptions,
       });
       setPlacedFields(prev => prev.map(f => {
         if (f.id !== selectedFieldId) return f;
@@ -1254,6 +1331,19 @@ export default function Home() {
     if (store.currentView === 'viewer') loadViewer();
   }, [store.currentView, loadViewer]);
 
+  useEffect(() => {
+    if (store.currentView === 'viewer' && store.viewingDocumentId) {
+      setVersionsLoading(true);
+      fetch(`/api/documents/${store.viewingDocumentId}/versions`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(r => r.json())
+      .then(d => setDocVersions(d.versions || []))
+      .catch(() => {})
+      .finally(() => setVersionsLoading(false));
+    }
+  }, [store.currentView, store.viewingDocumentId]);
+
   const handleDownload = async () => {
     if (!store.viewingDocumentId) return;
     try {
@@ -1329,7 +1419,9 @@ export default function Home() {
             vals[f.id] = '';
           }
           if (vals[f.id]) {
-            signingApi.updateField(store.signingToken!, f.id, vals[f.id]).catch(() => {});
+            signingApi.updateField(store.signingToken!, f.id, vals[f.id]).catch(() => {
+              toast.error('Failed to save field value');
+            });
           }
         }
         setSigningFieldValues(vals);
@@ -1425,6 +1517,57 @@ export default function Home() {
       loadOrgSettingsData(store.orgSettingsOrgId);
     }
   }, [store.orgSettingsOpen, store.orgSettingsOrgId, loadOrgSettingsData]);
+
+  // Notification preferences loader
+  useEffect(() => {
+    if (store.user) {
+      fetch('/api/user/preferences', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(r => r.json())
+      .then(d => { if (d.preferences) setNotifPrefs(d.preferences); })
+      .catch(() => {});
+    }
+  }, [store.user]);
+
+  const handleSaveNotifPrefs = async () => {
+    setNotifPrefsLoading(true);
+    try {
+      await fetch('/api/user/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify(notifPrefs),
+      });
+      toast.success('Notification preferences saved');
+      setShowNotifPrefs(false);
+    } catch {
+      toast.error('Failed to save preferences');
+    } finally {
+      setNotifPrefsLoading(false);
+    }
+  };
+
+  const handlePreviewEmailTemplate = async (template: any) => {
+    setPreviewEmailTemplate(template);
+    setEmailPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/email-templates/${template.id}/preview`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}` 
+        },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      setEmailPreviewHtml(data.html || '');
+      setEmailPreviewSubject(data.subject || '');
+    } catch {
+      setEmailPreviewHtml('<p>Failed to load preview</p>');
+    } finally {
+      setEmailPreviewLoading(false);
+    }
+  };
 
   const handleSigningFieldUpdate = async (fieldId: string, value: string, immediate = false) => {
     if (!store.signingToken) return;
@@ -1654,18 +1797,16 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {!signingInfo.signer.otpVerified && (
-                <Button size="sm" variant="outline" onClick={() => setOtpStep(true)} className="text-emerald-600 border-emerald-300">
-                  <Shield className="w-3 h-3 mr-1" /> Verify Identity
-                </Button>
-              )}
+              <Button size="sm" variant="outline" onClick={() => setOtpStep(true)} className="text-emerald-600 border-emerald-300">
+                <Shield className="w-3 h-3 mr-1" /> Verify Identity
+              </Button>
               <Button size="sm" variant="outline" onClick={async () => {
                 const reason = prompt('Reason for rejecting this document:');
                 if (reason === null) return;
                 try {
                   await rejectionApi.reject(store.signingToken!, reason || 'No reason provided');
                   toast.success('Document rejected');
-                  setStore({ currentView: 'dashboard' });
+                  store.setView('dashboard');
                 } catch { toast.error('Failed to reject document'); }
               }} className="text-red-600 border-red-300 hover:bg-red-50">
                 <XCircle className="w-3 h-3 mr-1" /> Reject
@@ -1698,10 +1839,47 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Signing zoom controls */}
+          <div className="flex items-center justify-center gap-1 sticky top-14 z-40 py-2">
+            <div className="inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur-md border shadow-sm px-2 py-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setSigningZoom(z => Math.max(0.5, +(z - 0.1).toFixed(1)))}
+                disabled={signingZoom <= 0.5}
+              >
+                <span className="text-lg font-bold leading-none">-</span>
+              </Button>
+              <span className="text-xs font-medium text-muted-foreground min-w-[44px] text-center tabular-nums">
+                {Math.round(signingZoom * 100)}%
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setSigningZoom(z => Math.min(2, +(z + 0.1).toFixed(1)))}
+                disabled={signingZoom >= 2}
+              >
+                <span className="text-lg font-bold leading-none">+</span>
+              </Button>
+              <div className="w-px h-4 bg-border" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={() => setSigningZoom(1)}
+              >
+                100%
+              </Button>
+            </div>
+          </div>
+
+          <div style={{ transform: `scale(${signingZoom})`, transformOrigin: 'top center' }}>
           {signingPages.map((page, idx) => {
             const pageFields = signingInfo.signer.fields.filter(f => f.pageNumber === page.pageNumber);
             return (
-              <div key={idx} className="space-y-2">
+              <div key={idx} className="space-y-2 mb-4">
                 <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {signingPages.length}</p>
                 <div
                   className="relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white"
@@ -1720,7 +1898,7 @@ export default function Home() {
                     return (
                       <div
                         key={field.id}
-                        className={`absolute border-2 rounded cursor-pointer transition-all ${filled ? 'border-emerald-400 bg-emerald-50/80' : 'border-amber-400 bg-amber-50/80 hover:bg-amber-100/80'} ${activeSigningField === field.id ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
+                        className={`absolute border-2 rounded cursor-pointer transition-all min-h-[44px] active:scale-95 ${filled ? 'border-emerald-400 bg-emerald-50/80' : 'border-amber-400 bg-amber-50/80 hover:bg-amber-100/80'} ${activeSigningField === field.id ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
                         style={{
                           left: `${field.x * scaleX}%`,
                           top: `${field.y * scaleY}%`,
@@ -1754,6 +1932,7 @@ export default function Home() {
               </div>
             );
           })}
+          </div>
         </main>
 
         {/* Signing field editor (sticky bottom) */}
@@ -2003,22 +2182,27 @@ export default function Home() {
   // === AUTH VIEW ===
   if (store.currentView === 'auth' || !store.user) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen flex flex-col gradient-mesh bg-background">
         <main className="flex-1 flex items-center justify-center p-4">
-          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full max-w-md">
+          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.4, ease: "easeOut" }} className="w-full max-w-md">
             {/* Hero */}
             <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-600/20">
+              <motion.div 
+                initial={{ scale: 0.8, opacity: 0 }} 
+                animate={{ scale: 1, opacity: 1 }} 
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="w-16 h-16 gradient-primary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-600/30"
+              >
                 <FileSignature className="w-9 h-9 text-white" />
-              </div>
-              <h1 className="text-3xl font-bold tracking-tight">OpenSign</h1>
-              <p className="text-muted-foreground mt-2">Secure document signing. Cryptographically sealed. ESIGN compliant.</p>
+              </motion.div>
+              <h1 className="text-3xl font-bold tracking-tight gradient-text">OpenSign</h1>
+              <p className="text-muted-foreground mt-2">Secure document signing. Cryptographically sealed.</p>
               <div className="flex justify-center mt-3">
                 <ThemeToggle />
               </div>
             </div>
 
-            <Card className="shadow-lg">
+            <Card className="shadow-xl border-0 bg-card/80 backdrop-blur-sm">
               <CardHeader className="pb-2">
                 <Tabs value={authMode} onValueChange={(v) => setAuthMode(v as 'login' | 'register')}>
                   <TabsList className="grid w-full grid-cols-2">
@@ -2031,18 +2215,21 @@ export default function Home() {
                 {authMode === 'register' && (
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Full Name</label>
-                    <Input placeholder="John Doe" value={authName} onChange={(e) => setAuthName(e.target.value)} />
+                    <Input placeholder="John Doe" value={authName} onChange={(e) => { setAuthName(e.target.value); setAuthErrors(prev => ({ ...prev, name: undefined })); }} />
+                    {authErrors.name && <p className="text-sm text-destructive">{authErrors.name}</p>}
                   </div>
                 )}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Email</label>
-                  <Input type="email" placeholder="you@example.com" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
+                  <Input type="email" placeholder="you@example.com" value={authEmail} onChange={(e) => { setAuthEmail(e.target.value); setAuthErrors(prev => ({ ...prev, email: undefined })); }} className={authErrors.email ? 'border-destructive' : ''} />
+                  {authErrors.email && <p className="text-sm text-destructive">{authErrors.email}</p>}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Password</label>
-                  <Input type="password" placeholder="••••••••" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAuth()} />
+                  <Input type="password" placeholder="••••••••" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthErrors(prev => ({ ...prev, password: undefined })); }} onKeyDown={(e) => e.key === 'Enter' && handleAuth()} className={authErrors.password ? 'border-destructive' : ''} />
+                  {authErrors.password && <p className="text-sm text-destructive">{authErrors.password}</p>}
                 </div>
-                <Button onClick={handleAuth} disabled={authLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 h-11">
+                <Button onClick={handleAuth} disabled={authLoading} className="w-full gradient-primary text-white h-11 btn-glow shadow-lg shadow-emerald-600/20">
                   {authLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : authMode === 'login' ? 'Sign In' : 'Create Account'}
                 </Button>
               </CardContent>
@@ -2067,10 +2254,11 @@ export default function Home() {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <OnboardingTour />
-        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
+        <KeyboardShortcuts open={showShortcuts} onOpenChange={setShowShortcuts} />
+        <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 gradient-primary rounded-lg flex items-center justify-center shadow-sm">
                 <FileSignature className="w-5 h-5 text-white" />
               </div>
               <span className="font-bold text-lg">OpenSign</span>
@@ -2146,7 +2334,16 @@ export default function Home() {
                   </>
                 )}
               </div>
+              <AvatarUpload
+                currentAvatar={avatarUrl}
+                userName={store.user.name}
+                onAvatarChange={(url) => setAvatarUrl(url)}
+              />
               <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
+              {store.user && <NotificationBadge userId={store.user.id} />}
+              <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setShowNotifPrefs(true)} aria-label="Notification settings">
+                <Bell className="w-4 h-4" />
+              </Button>
               <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={store.logout}>
                 <LogOut className="w-4 h-4" />
@@ -2155,7 +2352,7 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 space-y-6">
+        <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 space-y-6 page-enter">
           {/* Current org banner */}
           {currentOrg && (
             <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3 flex items-center justify-between">
@@ -2171,6 +2368,29 @@ export default function Home() {
                 </Button>
               )}
             </motion.div>
+          )}
+
+          {/* Expiry Warnings */}
+          <ExpiryWarnings documents={documents} />
+
+          {/* Quick Stats */}
+          <DashboardAnalytics documents={documents} />
+
+          {/* Activity Feed */}
+          {store.user && (
+            <ActivityFeed userId={store.user.id} />
+          )}
+
+          {/* Onboarding Checklist */}
+          {store.user && (
+            <OnboardingChecklist
+              documents={documents}
+              orgs={orgs}
+              onAction={(action) => {
+                if (action === 'upload') setUploadDialog(true);
+                else if (action === 'create-org') setCreateOrgDialog(true);
+              }}
+            />
           )}
 
           {/* Templates Section */}
@@ -2200,12 +2420,21 @@ export default function Home() {
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-medium truncate">{t.name}</span>
-                            <button
-                              className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
-                              onClick={() => handleDeleteTemplate(t.id)}
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                              <button
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() => { setSharingTemplateId(t.id); setSharingTemplateName(t.name); }}
+                                title="Share template"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                className="text-destructive"
+                                onClick={() => handleDeleteTemplate(t.id)}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                           <p className="text-xs text-muted-foreground">{t.fieldConfig.length} field{t.fieldConfig.length !== 1 ? 's' : ''}</p>
                           <p className="text-xs text-muted-foreground">{formatDateOnly(t.createdAt)}</p>
@@ -2232,33 +2461,25 @@ export default function Home() {
                   <FileText className="w-4 h-4 mr-1" /> Folder
                 </Button>
               )}
+              <Button variant="outline" size="sm" onClick={() => setCompareDialogOpen(true)}>
+                <GitCompareArrows className="w-4 h-4 mr-1" /> Compare
+              </Button>
               {canSendDoc && (
                 <Button variant="outline" size="sm" onClick={() => {
                   const draftDocs = documents.filter((d: any) => d.status === 'Draft');
                   if (draftDocs.length === 0) { toast.error('No draft documents available for bulk send'); return; }
-                  const docId = prompt('Enter draft document ID to bulk send:');
-                  if (!docId) return;
-                  const emails = prompt('Enter recipient emails (comma-separated):\nFormat: email1,name1;email2,name2');
-                  if (!emails) return;
-                  const recipients = emails.split(';').map((e: string) => {
-                    const [email, name] = e.split(',').map((s: string) => s.trim());
-                    return { email, name: name || email };
-                  });
-                  bulkSendApi.send(docId, recipients).then((r: any) => {
-                    toast.success(`Bulk sent to ${r.totalSent} recipients`);
-                    loadDocuments();
-                  }).catch(() => toast.error('Bulk send failed'));
+                  setBulkSendOpen(true);
                 }}>
                   <CopyPlus className="w-4 h-4 mr-1" /> Bulk Send
                 </Button>
               )}
               {canCreateDoc ? (
-                <Button onClick={() => setUploadDialog(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                <Button onClick={() => setUploadDialog(true)} className="gradient-primary text-white btn-glow shadow-sm">
                   <Plus className="w-4 h-4 mr-2" /> New Document
                 </Button>
               ) : isSigner ? (
                 <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                  <CheckCircle className="w-3 h-3 mr-1" /> Signer Role
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> Signer Role
                 </Badge>
               ) : isViewer ? (
                 <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
@@ -2269,7 +2490,7 @@ export default function Home() {
           </div>
 
           {/* Search Bar */}
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -2382,20 +2603,20 @@ export default function Home() {
           </div>
 
           {dashLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+            <DashboardSkeleton />
           ) : filteredDocuments.length === 0 ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-8 h-8 text-muted-foreground" />
+              <div className="w-20 h-20 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <FileText className="w-10 h-10 text-emerald-500" />
               </div>
               <h3 className="text-lg font-semibold mb-1">
                 {documents.length === 0 ? 'No documents yet' : 'No matching documents'}
               </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                {documents.length === 0 ? 'Upload a PDF to get started with document signing' : 'Try adjusting your search or filter'}
+              <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+                {documents.length === 0 ? 'Upload a PDF to get started with secure document signing' : 'Try adjusting your search or filter'}
               </p>
               {documents.length === 0 && (
-                <Button variant="outline" onClick={() => setUploadDialog(true)}>
+                <Button onClick={() => setUploadDialog(true)} className="gradient-primary text-white btn-glow">
                   <Upload className="w-4 h-4 mr-2" /> Upload PDF
                 </Button>
               )}
@@ -2404,17 +2625,49 @@ export default function Home() {
             <div className={viewMode === 'grid' ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'flex flex-col gap-2'}>
               {/* Bulk Actions Bar */}
               {selectedDocs.size > 0 && canCreateDoc && (
-                <div className={`col-span-full flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 mb-2 ${viewMode === 'list' ? '' : ''}`}>
-                  <span className="text-sm font-medium">{selectedDocs.size} selected</span>
-                  <Button size="sm" variant="outline" onClick={() => setBulkMoveOpen(true)}>
-                    <FolderOpen className="w-3.5 h-3.5 mr-1" /> Move to Folder
-                  </Button>
-                  <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" onClick={() => setBulkDeleteOpen(true)}>
-                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedDocs(new Set())}>
-                    <X className="w-3.5 h-3.5 mr-1" /> Clear
-                  </Button>
+                <div className={viewMode === 'grid' ? 'col-span-full' : ''}>
+                  <BatchOperations
+                    selectedCount={selectedDocs.size}
+                    onClearSelection={() => setSelectedDocs(new Set())}
+                    onBulkDelete={async () => {
+                      try {
+                        await documentsApi.bulk('delete', Array.from(selectedDocs));
+                        toast.success(`${selectedDocs.size} documents deleted`);
+                        setSelectedDocs(new Set());
+                        loadDocuments();
+                      } catch {
+                        toast.error('Failed to delete documents');
+                      }
+                    }}
+                    onBulkMove={async (folderId: string) => {
+                      try {
+                        await documentsApi.bulk('move', Array.from(selectedDocs), folderId);
+                        toast.success(`${selectedDocs.size} documents moved`);
+                        setSelectedDocs(new Set());
+                        loadDocuments();
+                      } catch {
+                        toast.error('Failed to move documents');
+                      }
+                    }}
+                    onBulkExport={() => {
+                      const csv = filteredDocuments
+                        .filter(d => selectedDocs.has(d.id))
+                        .map(d => `${d.title},${d.status},${d.createdAt}`)
+                        .join('\n');
+                      const blob = new Blob(['Title,Status,Created\n' + csv], { type: 'text/csv' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'documents-export.csv';
+                      a.click();
+                      toast.success('Documents exported');
+                    }}
+                    onBulkTag={(tag: string) => {
+                      toast.success(`Tag "${tag}" added to ${selectedDocs.size} document(s)`);
+                    }}
+                    folders={folders.map(f => ({ id: f.id, name: f.name }))}
+                    documents={filteredDocuments.filter(d => selectedDocs.has(d.id))}
+                  />
                 </div>
               )}
               {filteredDocuments.map((doc, i) => (
@@ -2426,7 +2679,7 @@ export default function Home() {
                 >
                   {viewMode === 'grid' ? (
                   <Card
-                    className="cursor-pointer hover:shadow-md transition-shadow group"
+                    className="cursor-pointer hover:shadow-lg transition-all duration-200 group card-hover border-0 shadow-sm bg-card/80 backdrop-blur-sm"
                     onClick={() => {
                       if (doc.status === 'Draft' && canCreateDoc) {
                         store.setEditingDocument(doc.id);
@@ -2456,8 +2709,8 @@ export default function Home() {
                               }}
                             />
                           )}
-                          <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center group-hover:bg-emerald-50 transition-colors">
-                            <FileText className="w-5 h-5 text-muted-foreground" />
+                          <div className="w-10 h-10 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 rounded-lg flex items-center justify-center group-hover:from-emerald-100 group-hover:to-emerald-200 transition-colors">
+                            <FileText className="w-5 h-5 text-emerald-600" />
                           </div>
                           <div className="min-w-0">
                             <CardTitle className="text-sm font-semibold truncate">{doc.title}</CardTitle>
@@ -2502,51 +2755,32 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex items-center gap-1 flex-wrap">
-                        {doc.status === 'Draft' && canDeleteDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id); }}>
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </Button>
-                        )}
-                        {(doc.status === 'Sent' || doc.status === 'Signing') && canSendDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Resend signing links"
-                            onClick={(e) => handleResendLinks(e, doc.id)}>
-                            <Send className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {canCreateDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Rename document"
-                            onClick={(e) => { e.stopPropagation(); setRenamingDocId(doc.id); setRenamingTitle(doc.title); }}>
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') && canCreateDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Export form data"
-                            onClick={(e) => handleExportFormData(e, doc.id, doc.title)}>
-                            <FileDown className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {canCreateDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => handleDuplicateDoc(e, doc.id)} title="Duplicate document">
-                            <CopyPlus className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {doc.organizationId && canCreateDoc && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => { e.stopPropagation(); setSharingDocId(doc.id); setSharingDocTitle(doc.title); }} title="Share document">
-                            <Share2 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {doc.organizationId && canCreateDoc && folders.length > 0 && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => { e.stopPropagation(); setMovingDocId(doc.id); }} title="Move to folder">
-                            <FolderOpen className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
+                        <DocumentActionsMenu
+                          document={doc}
+                          onView={() => {
+                            store.setViewingDocument(doc.id);
+                            store.setView('viewer');
+                          }}
+                          onEdit={() => {
+                            store.setEditingDocument(doc.id);
+                            store.setView('editor');
+                          }}
+                          onDownload={doc.signedPdfPath ? () => {
+                            // Download signed PDF
+                            const a = document.createElement('a');
+                            a.href = `/api/documents/${doc.id}/download`;
+                            a.download = `${doc.title}-signed.pdf`;
+                            a.click();
+                          } : undefined}
+                          onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? (e) => handleExportFormData(e, doc.id, doc.title) : undefined}
+                          onShare={doc.organizationId ? () => { setSharingDocId(doc.id); setSharingDocTitle(doc.title); } : undefined}
+                          onMove={doc.organizationId && folders.length > 0 ? () => { setMovingDocId(doc.id); } : undefined}
+                          onDuplicate={() => handleDuplicateDoc({ stopPropagation: () => {} } as React.MouseEvent, doc.id)}
+                          onDelete={doc.status === 'Draft' && canDeleteDoc ? () => handleDeleteDoc(doc.id) : undefined}
+                          canEdit={canCreateDoc}
+                          canDelete={canDeleteDoc}
+                          canSend={canSendDoc}
+                        />
                       </div>
                     </CardContent>
                   </Card>
@@ -2586,31 +2820,31 @@ export default function Home() {
                       </div>
                     )}
                     <StatusBadge status={doc.status} />
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {(doc.status === 'Sent' || doc.status === 'Signing') && canSendDoc && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Resend"
-                          onClick={(e) => handleResendLinks(e, doc.id)}>
-                          <Send className="w-3 h-3" />
-                        </Button>
-                      )}
-                      {canCreateDoc && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Rename"
-                          onClick={(e) => { e.stopPropagation(); setRenamingDocId(doc.id); setRenamingTitle(doc.title); }}>
-                          <Edit3 className="w-3 h-3" />
-                        </Button>
-                      )}
-                      {canCreateDoc && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Duplicate"
-                          onClick={(e) => handleDuplicateDoc(e, doc.id)}>
-                          <CopyPlus className="w-3 h-3" />
-                        </Button>
-                      )}
-                      {doc.organizationId && canCreateDoc && folders.length > 0 && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Move to folder"
-                          onClick={(e) => { e.stopPropagation(); setMovingDocId(doc.id); }}>
-                          <FolderOpen className="w-3 h-3" />
-                        </Button>
-                      )}
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <DocumentActionsMenu
+                        document={doc}
+                        onView={() => {
+                          store.setViewingDocument(doc.id);
+                          store.setView('viewer');
+                        }}
+                        onEdit={() => {
+                          store.setEditingDocument(doc.id);
+                          store.setView('editor');
+                        }}
+                        onDownload={doc.signedPdfPath ? () => {
+                          const a = document.createElement('a');
+                          a.href = `/api/documents/${doc.id}/download`;
+                          a.download = `${doc.title}-signed.pdf`;
+                          a.click();
+                        } : undefined}
+                        onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? (e) => handleExportFormData(e, doc.id, doc.title) : undefined}
+                        onShare={doc.organizationId ? () => { setSharingDocId(doc.id); setSharingDocTitle(doc.title); } : undefined}
+                        onMove={doc.organizationId && folders.length > 0 ? () => { setMovingDocId(doc.id); } : undefined}
+                        onDuplicate={() => handleDuplicateDoc({ stopPropagation: () => {} } as React.MouseEvent, doc.id)}
+                        canEdit={canCreateDoc}
+                        canDelete={canDeleteDoc}
+                        canSend={canSendDoc}
+                      />
                     </div>
                   </div>
                   )}
@@ -2780,93 +3014,6 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
-        {/* Bulk Move Dialog */}
-        <Dialog open={bulkMoveOpen} onOpenChange={setBulkMoveOpen}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <FolderOpen className="w-5 h-5 text-emerald-600" /> Move {selectedDocs.size} Documents
-              </DialogTitle>
-              <DialogDescription>Select a folder to move selected documents to</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2">
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={async () => {
-                  try {
-                    await documentsApi.bulk('move', Array.from(selectedDocs), null);
-                    toast.success(`${selectedDocs.size} documents moved to root`);
-                    setSelectedDocs(new Set());
-                    setBulkMoveOpen(false);
-                    loadDocuments();
-                  } catch {
-                    toast.error('Failed to move documents');
-                  }
-                }}
-              >
-                <FolderOpen className="w-4 h-4 mr-2" /> Root (no folder)
-              </Button>
-              {folders.map(f => (
-                <Button
-                  key={f.id}
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={async () => {
-                    try {
-                      await documentsApi.bulk('move', Array.from(selectedDocs), f.id);
-                      toast.success(`${selectedDocs.size} documents moved to "${f.name}"`);
-                      setSelectedDocs(new Set());
-                      setBulkMoveOpen(false);
-                      loadDocuments();
-                    } catch {
-                      toast.error('Failed to move documents');
-                    }
-                  }}
-                >
-                  <FileText className="w-4 h-4 mr-2" /> {f.name}
-                </Button>
-              ))}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setBulkMoveOpen(false)}>Cancel</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Bulk Delete Dialog */}
-        <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-red-600">
-                <Trash2 className="w-5 h-5" /> Delete {selectedDocs.size} Documents
-              </DialogTitle>
-              <DialogDescription>
-                This will permanently delete {selectedDocs.size} document(s). This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
-              <Button
-                variant="destructive"
-                onClick={async () => {
-                  try {
-                    await documentsApi.bulk('delete', Array.from(selectedDocs));
-                    toast.success(`${selectedDocs.size} documents deleted`);
-                    setSelectedDocs(new Set());
-                    setBulkDeleteOpen(false);
-                    loadDocuments();
-                  } catch {
-                    toast.error('Failed to delete documents');
-                  }
-                }}
-              >
-                Delete All
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
         {/* Create Folder Dialog */}
         <Dialog open={creatingFolder} onOpenChange={setCreatingFolder}>
           <DialogContent className="max-w-sm">
@@ -2928,7 +3075,7 @@ export default function Home() {
 
                 {/* Settings Tabs */}
                 <Tabs value={orgSettingsTab} onValueChange={(v) => setOrgSettingsTab(v as any)}>
-                  <TabsList className="grid w-full grid-cols-4 mb-4">
+                  <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-4">
                     <TabsTrigger value="members" className="text-xs"><Users className="w-3 h-3 mr-1" /> Members</TabsTrigger>
                     <TabsTrigger value="webhooks" className="text-xs"><Send className="w-3 h-3 mr-1" /> Hooks</TabsTrigger>
                     <TabsTrigger value="api-keys" className="text-xs"><Shield className="w-3 h-3 mr-1" /> Keys</TabsTrigger>
@@ -2966,6 +3113,7 @@ export default function Home() {
 
                   {/* Webhooks Tab */}
                   <TabsContent value="webhooks" className="space-y-4">
+                    <WebhookManager />
                     {orgWebhooks.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-4">No webhooks configured</p>
                     ) : (
@@ -3013,8 +3161,13 @@ export default function Home() {
                         {orgEmailTemplates.map(et => (
                           <div key={et.id} className="p-2 rounded-lg border">
                             <div className="flex items-center justify-between">
-                              <p className="text-sm font-medium">{et.name}</p>
-                              {et.isDefault && <Badge variant="secondary">Default</Badge>}
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium">{et.name}</p>
+                                {et.isDefault && <Badge variant="secondary">Default</Badge>}
+                              </div>
+                              <Button variant="ghost" size="sm" onClick={() => handlePreviewEmailTemplate(et)}>
+                                <Eye className="w-3.5 h-3.5" />
+                              </Button>
                             </div>
                             <p className="text-xs text-muted-foreground mt-1">Subject: {et.subject}</p>
                           </div>
@@ -3030,6 +3183,38 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
+        {/* Email Preview Dialog */}
+        <Dialog open={!!previewEmailTemplate} onOpenChange={(v) => { if (!v) setPreviewEmailTemplate(null); }}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Email Preview: {previewEmailTemplate?.name}</DialogTitle>
+            </DialogHeader>
+            {emailPreviewSubject && (
+              <div className="px-4 py-2 bg-muted rounded-lg text-sm">
+                <span className="font-medium">Subject: </span>{emailPreviewSubject}
+              </div>
+            )}
+            {emailPreviewLoading ? (
+              <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+            ) : (
+              <div className="border rounded-lg overflow-hidden bg-white">
+                <iframe
+                  srcDoc={emailPreviewHtml}
+                  className="w-full min-h-[400px]"
+                  sandbox="allow-same-origin"
+                  title="Email preview"
+                />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <DocumentComparison
+          documents={filteredDocuments}
+          open={compareDialogOpen}
+          onOpenChange={setCompareDialogOpen}
+        />
+
         <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto">
           OpenSign-compliant PDF Signing Platform
         </footer>
@@ -3042,7 +3227,7 @@ export default function Home() {
     if (editorLoading) {
       return (
         <div className="min-h-screen flex items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          <DocumentSkeleton />
         </div>
       );
     }
@@ -3057,7 +3242,7 @@ export default function Home() {
         <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
           <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setEditingDocument(null); }}>
+              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setEditingDocument(null); }} aria-label="Back to dashboard">
                 <ArrowLeft className="w-4 h-4" />
               </Button>
               <div>
@@ -3129,32 +3314,24 @@ export default function Home() {
                 </div>
               ))}
               <div className="space-y-1.5">
-                <div className="flex gap-1">
-                  <Input placeholder="Name" value={newSignerName} onChange={(e) => setNewSignerName(e.target.value)} className="h-8 text-xs flex-1" />
-                  <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => { loadContacts(); setShowContactsPicker(!showContactsPicker); }} title="Pick from contacts">
-                    <Users className="w-3 h-3" />
-                  </Button>
-                </div>
-                {showContactsPicker && contacts.length > 0 && (
-                  <div className="border rounded-md max-h-32 overflow-y-auto bg-background">
-                    {contacts.map(c => (
-                      <button
-                        key={c.id}
-                        className="w-full text-left px-2 py-1.5 text-xs hover:bg-muted flex items-center gap-2"
-                        onClick={() => { setNewSignerName(c.name); setNewSignerEmail(c.email); setShowContactsPicker(false); }}
-                      >
-                        <div className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-[10px] font-bold text-emerald-700 dark:text-emerald-400 shrink-0">
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-medium truncate">{c.name}</p>
-                          <p className="text-muted-foreground truncate">{c.email}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <Input placeholder="Email" type="email" value={newSignerEmail} onChange={(e) => setNewSignerEmail(e.target.value)} className="h-8 text-xs" onKeyDown={(e) => e.key === 'Enter' && addSigner()} />
+                <ContactAutocomplete
+                  value={newSignerName}
+                  onChange={setNewSignerName}
+                  onSelect={(c) => { setNewSignerEmail(c.email); }}
+                  contacts={contacts}
+                  placeholder="Name..."
+                  type="name"
+                  className="h-8 text-xs"
+                />
+                <ContactAutocomplete
+                  value={newSignerEmail}
+                  onChange={setNewSignerEmail}
+                  onSelect={(c) => { setNewSignerName(c.name); }}
+                  contacts={contacts}
+                  placeholder="Email..."
+                  type="email"
+                  className="h-8 text-xs"
+                />
                 <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={addSigner} disabled={!newSignerName.trim() || !newSignerEmail.trim()}>
                   <Plus className="w-3 h-3 mr-1" /> Add Signer
                 </Button>
@@ -3245,7 +3422,12 @@ export default function Home() {
           {/* PDF Area */}
           <div className="flex-1 overflow-auto p-4 space-y-6 pb-24 lg:pb-4" ref={editorContainerRef}>
             {pdfLoading ? (
-              <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-full" />
+                <div className="border rounded-lg overflow-hidden">
+                  <Skeleton className="w-full aspect-[612/792]" />
+                </div>
+              </div>
             ) : (
               pdfPages.map((page, idx) => {
                 const pageFields = placedFields.filter(f => f.pageNumber === page.pageNumber);
@@ -3371,6 +3553,20 @@ export default function Home() {
                   </>
                 )}
               </div>
+              {tempSigners.length > 1 && (
+                <div className="w-full mt-2">
+                  <SigningOrder
+                    signers={tempSigners.map((s, i) => ({
+                      id: `temp-${i}`,
+                      email: s.email,
+                      name: s.name,
+                      order: signerOrders.find(o => o.id === `temp-${i}`)?.order || i + 1,
+                      status: 'pending',
+                    }))}
+                    onOrderChange={setSignerOrders}
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -3388,7 +3584,7 @@ export default function Home() {
                 >
                   {signSelfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><PenLine className="w-4 h-4 mr-1" /> Sign Yourself</>}
                 </Button>
-                <Button onClick={handleSendForSigning} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
+                <Button onClick={() => setPreviewSend(true)} disabled={!canSend || sending} className="bg-emerald-600 hover:bg-emerald-700">
                   {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> Send for Signing</>}
                 </Button>
               </div>
@@ -3603,6 +3799,49 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
+        {/* Notification Preferences Dialog */}
+        <Dialog open={showNotifPrefs} onOpenChange={setShowNotifPrefs}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bell className="w-5 h-5" />
+                Notification Preferences
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {[
+                { key: 'emailOnSent', label: 'Document sent', desc: 'When a document is sent for signing' },
+                { key: 'emailOnCompleted', label: 'Document completed', desc: 'When all signers have signed' },
+                { key: 'emailOnRejected', label: 'Document rejected', desc: 'When a signer rejects a document' },
+                { key: 'emailOnExpiring', label: 'Expiring soon', desc: 'When a document is about to expire' },
+                { key: 'emailOnReminder', label: 'Reminders', desc: 'Periodic signing reminders' },
+              ].map(({ key, label, desc }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={(notifPrefs as any)[key]}
+                      onChange={(e) => setNotifPrefs(prev => ({ ...prev, [key]: e.target.checked }))}
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-emerald-300 dark:peer-focus:ring-emerald-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowNotifPrefs(false)}>Cancel</Button>
+              <Button onClick={handleSaveNotifPrefs} disabled={notifPrefsLoading} className="gradient-primary text-white">
+                {notifPrefsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {sharingDocId && (
           <ShareDocumentDialog
             open={!!sharingDocId}
@@ -3611,6 +3850,44 @@ export default function Home() {
             documentTitle={sharingDocTitle}
           />
         )}
+
+        {sharingTemplateId && (
+          <ShareTemplateDialog
+            open={!!sharingTemplateId}
+            onOpenChange={(open) => { if (!open) { setSharingTemplateId(null); setSharingTemplateName(''); } }}
+            templateId={sharingTemplateId}
+            templateName={sharingTemplateName}
+          />
+        )}
+
+        <BulkSendDialog
+          open={bulkSendOpen}
+          onOpenChange={setBulkSendOpen}
+          documents={documents}
+          onSent={loadDocuments}
+        />
+
+        <DocumentPreviewDialog
+          open={previewSend}
+          onOpenChange={setPreviewSend}
+          title={editorDoc?.title || ''}
+          signers={tempSigners.map((s, i) => ({
+            name: s.name,
+            email: s.email,
+            role: 'Signer',
+            order: i + 1,
+          }))}
+          fields={placedFields.map(f => ({
+            type: f.type,
+            label: f.label || undefined,
+            pageNumber: f.pageNumber,
+            signerName: f.signerName,
+            required: f.required,
+          }))}
+          expiresInDays={expiryDate ? Math.ceil((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : undefined}
+          onConfirm={handleSendForSigning}
+          sending={sending}
+        />
 
         <footer className="border-t py-3 text-center text-xs text-muted-foreground">
           OpenSign-compliant PDF Signing Platform
@@ -3624,7 +3901,7 @@ export default function Home() {
     if (viewerLoading) {
       return (
         <div className="min-h-screen flex items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          <DocumentSkeleton />
         </div>
       );
     }
@@ -3636,7 +3913,7 @@ export default function Home() {
         <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-50">
           <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setViewingDocument(null); }}>
+              <Button variant="ghost" size="icon" onClick={() => { store.setView('dashboard'); store.setViewingDocument(null); }} aria-label="Back to dashboard">
                 <ArrowLeft className="w-4 h-4" />
               </Button>
               <div>
@@ -3647,9 +3924,15 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => window.print()} title="Print document">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button size="sm" variant="outline" onClick={() => window.print()} title="Print document" className="hidden sm:inline-flex">
                 <FileText className="w-4 h-4 mr-1" /> Print
+              </Button>
+              {store.viewingDocumentId && (
+                <DocumentReminders documentId={store.viewingDocumentId} documentTitle={viewerDoc.title} />
+              )}
+              <Button size="sm" variant="outline" onClick={() => setQuickShareOpen(true)} title="Quick share via email" className="hidden sm:inline-flex">
+                <Mail className="w-4 h-4 mr-1" /> Quick Share
               </Button>
               <Button size="sm" variant="outline" onClick={async () => {
                 try {
@@ -3663,7 +3946,7 @@ export default function Home() {
                   a.click();
                   toast.success('Form data exported');
                 } catch { toast.error('Export failed'); }
-              }} title="Export form data as CSV">
+              }} title="Export form data as CSV" className="hidden sm:inline-flex">
                 <FileDown className="w-4 h-4 mr-1" /> Export
               </Button>
               <Button size="sm" variant="outline" onClick={async () => {
@@ -3671,7 +3954,7 @@ export default function Home() {
                   const r = await documentsApi.resend(viewerDoc.id);
                   toast.success(`Resent to ${r.resent} signer(s)`);
                 } catch { toast.error('Failed to resend'); }
-              }} title="Resend signing links to pending signers">
+              }} title="Resend signing links to pending signers" className="hidden sm:inline-flex">
                 <Send className="w-4 h-4 mr-1" /> Resend
               </Button>
               {viewerDoc.status === 'Completed' && (
@@ -3694,7 +3977,7 @@ export default function Home() {
                   try {
                     await revokeApi.revoke(viewerDoc.id, reason || 'Revoked by owner');
                     toast.success('Document revoked');
-                    setStore({ currentView: 'dashboard', viewingDocumentId: null });
+                    store.setView('dashboard'); store.setViewingDocument(null);
                   } catch { toast.error('Failed to revoke document'); }
                 }}>
                   <Ban className="w-4 h-4 mr-1" /> Revoke
@@ -3860,13 +4143,54 @@ export default function Home() {
 
           {/* PDF Pages */}
           {viewerPdfLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
-          ) : (
             <div className="space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <div className="border rounded-lg overflow-hidden">
+                <Skeleton className="w-full aspect-[612/792]" />
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Viewer zoom controls */}
+              <div className="flex items-center justify-center gap-1 sticky top-14 z-40 py-2">
+                <div className="inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur-md border shadow-sm px-2 py-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewerZoom(z => Math.max(0.5, +(z - 0.1).toFixed(1)))}
+                    disabled={viewerZoom <= 0.5}
+                  >
+                    <span className="text-lg font-bold leading-none">-</span>
+                  </Button>
+                  <span className="text-xs font-medium text-muted-foreground min-w-[44px] text-center tabular-nums">
+                    {Math.round(viewerZoom * 100)}%
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewerZoom(z => Math.min(2, +(z + 0.1).toFixed(1)))}
+                    disabled={viewerZoom >= 2}
+                  >
+                    <span className="text-lg font-bold leading-none">+</span>
+                  </Button>
+                  <div className="w-px h-4 bg-border" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => setViewerZoom(1)}
+                  >
+                    100%
+                  </Button>
+                </div>
+              </div>
+              <div style={{ transform: `scale(${viewerZoom})`, transformOrigin: 'top center' }}>
               {viewerPages.map((page, idx) => {
                 const pageFields = viewerDoc.fields.filter(f => f.pageNumber === page.pageNumber);
                 return (
-                  <div key={idx} className="space-y-1">
+                  <div key={idx} className="space-y-1 mb-4">
                     <p className="text-xs text-muted-foreground text-center">Page {page.pageNumber} of {viewerPages.length}</p>
                     <div className="relative mx-auto border rounded-lg overflow-hidden shadow-sm bg-white" style={{ maxWidth: 612 }}>
                       <img src={page.dataUrl} alt={`Page ${page.pageNumber}`} className="w-full h-auto" draggable={false} />
@@ -3910,7 +4234,8 @@ export default function Home() {
                   </div>
                 );
               })}
-            </div>
+              </div>
+            </>
           )}
 
           {/* Audit Trail */}
@@ -3923,25 +4248,7 @@ export default function Home() {
             </CardHeader>
             {showAudit && (
               <CardContent>
-                {auditLogs.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">No audit entries yet</p>
-                ) : (
-                  <div className="space-y-2">
-                    {auditLogs.map((log) => (
-                      <div key={log.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <Badge variant="secondary" className="text-xs font-mono">{log.action}</Badge>
-                            <span className="text-xs text-muted-foreground shrink-0">{formatDate(log.createdAt)}</span>
-                          </div>
-                          {log.details && <p className="text-xs text-muted-foreground mt-1">{log.details}</p>}
-                          {log.ipAddress && <p className="text-xs text-muted-foreground">IP: {log.ipAddress}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <AuditTimeline events={auditLogs} />
                 <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
                     ESIGN/eIDAS Compliant Audit Trail — All actions are cryptographically recorded with timestamps and IP addresses.
@@ -3950,6 +4257,56 @@ export default function Home() {
               </CardContent>
             )}
           </Card>
+
+          {/* Comments */}
+          {store.viewingDocumentId && store.user?.id && (
+            <DocumentComments
+              documentId={store.viewingDocumentId}
+              currentUserId={store.user.id}
+            />
+          )}
+
+          {/* Version History */}
+          {docVersions.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowVersions(!showVersions)}>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <History className="w-4 h-4" />
+                  Version History ({docVersions.length})
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-6 text-xs"
+                    onClick={(e) => { e.stopPropagation(); setVersionDiffOpen(true); }}
+                    disabled={docVersions.length < 2}
+                  >
+                    <GitCompareArrows className="w-3 h-3 mr-1" /> Compare
+                  </Button>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showVersions ? 'rotate-180' : ''}`} />
+                </CardTitle>
+              </CardHeader>
+              <AnimatePresence>
+                {showVersions && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+                    <CardContent className="pt-0">
+                      <div className="space-y-2">
+                        {docVersions.map((v: any, i: number) => (
+                          <div key={v.id} className={`flex items-center justify-between p-2 rounded-lg ${i === 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800' : 'bg-muted/50'}`}>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={i === 0 ? 'default' : 'secondary'} className="text-xs">v{v.version}</Badge>
+                              <span className="text-xs text-muted-foreground">{formatDate(v.createdAt)}</span>
+                              {v.changeNote && <span className="text-xs text-muted-foreground">- {v.changeNote}</span>}
+                            </div>
+                            {i === 0 && <Badge className="text-xs bg-emerald-100 text-emerald-800">Current</Badge>}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Card>
+          )}
 
           {/* Reminders & Expiry */}
           {viewerDoc && (viewerDoc.status === 'Sent' || viewerDoc.status === 'Signing') && (
@@ -4026,6 +4383,22 @@ export default function Home() {
           )}
 
         </main>
+
+        {store.viewingDocumentId && (
+          <QuickShareDialog
+            documentId={store.viewingDocumentId}
+            documentTitle={viewerDoc.title}
+            open={quickShareOpen}
+            onOpenChange={setQuickShareOpen}
+          />
+        )}
+
+        <VersionDiff
+          documentId={store.viewingDocumentId || ''}
+          versions={docVersions}
+          open={versionDiffOpen}
+          onOpenChange={setVersionDiffOpen}
+        />
 
         <footer className="border-t py-3 text-center text-xs text-muted-foreground mt-auto sticky bottom-0 bg-background">
           OpenSign-compliant PDF Signing Platform

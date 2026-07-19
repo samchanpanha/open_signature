@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken, generateSignerToken } from '@/lib/auth';
+import { generateSignerToken } from '@/lib/auth'
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // POST /api/documents/bulk-send - Send same document to multiple recipient groups
 export async function POST(req: NextRequest) {

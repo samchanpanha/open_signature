@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { unlink } from 'fs/promises';
-import path from 'path';
+import { getAuthUser } from '@/lib/permissions';
+import { deletePdfStorage } from '@/lib/s3';
 
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // POST /api/documents/bulk - Bulk operations on documents
 export async function POST(req: NextRequest) {
@@ -50,11 +42,10 @@ export async function POST(req: NextRequest) {
       });
       affected = documentIds.length;
     } else if (action === 'delete') {
-      // Clean up files
       for (const doc of documents) {
-        try { await unlink(path.join(UPLOADS_DIR, doc.originalPdfPath)); } catch {}
+        await deletePdfStorage(doc.originalPdfPath);
         if (doc.signedPdfPath) {
-          try { await unlink(path.join(UPLOADS_DIR, doc.signedPdfPath)); } catch {}
+          await deletePdfStorage(doc.signedPdfPath);
         }
       }
       await db.document.deleteMany({

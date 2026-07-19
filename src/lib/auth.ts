@@ -1,11 +1,15 @@
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'opesign-jwt-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
+const SECRET: string = JWT_SECRET;
 
 export function generateToken(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 })).toString('base64url');
-  const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  const signature = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${signature}`;
 }
 
@@ -14,7 +18,7 @@ export function verifyToken(token: string): Record<string, unknown> | null {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [header, body, signature] = parts;
-    const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+    const expectedSig = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
     if (signature !== expectedSig) return null;
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (payload.exp && (payload.exp as number) < Date.now()) return null;
@@ -36,4 +40,20 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
 export function generateSignerToken(): string {
   return crypto.randomBytes(32).toString('hex');
+}
+
+export function generateOtpCode(): string {
+  return String(crypto.randomInt(100000, 999999));
+}
+
+export function hashOtp(code: string): string {
+  return crypto.createHash('sha256').update(code).digest('hex');
+}
+
+export function verifyOtp(storedHash: string, code: string): boolean {
+  const codeHash = hashOtp(code);
+  const storedBuf = Buffer.from(storedHash, 'hex');
+  const codeBuf = Buffer.from(codeHash, 'hex');
+  if (storedBuf.length !== codeBuf.length) return false;
+  return crypto.timingSafeEqual(storedBuf, codeBuf);
 }

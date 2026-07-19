@@ -41,6 +41,10 @@ export function NotificationCenter({ userId }: NotificationCenterProps) {
   async function fetchNotifications() {
     try {
       const res = await fetch('/api/notifications?limit=20');
+      if (!res.ok) {
+        console.error('Failed to fetch notifications:', res.statusText);
+        return;
+      }
       const data = await res.json();
       setNotifications(data.notifications || []);
       setUnreadCount(data.unreadCount || 0);
@@ -117,7 +121,7 @@ export function NotificationCenter({ userId }: NotificationCenterProps) {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
           <Bell className="w-5 h-5" />
           {unreadCount > 0 && (
             <Badge 

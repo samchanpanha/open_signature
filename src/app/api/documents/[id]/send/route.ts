@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken, generateSignerToken } from '@/lib/auth';
+import { generateSignerToken } from '@/lib/auth'
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
-import { getUserRole, hasPermission } from '@/lib/permissions';
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions'
+import { isValidEmail, sanitizeString } from '@/lib/validation'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -25,6 +22,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     if (!fieldAssignments || fieldAssignments.length === 0) {
       return NextResponse.json({ error: 'Assign at least one field to a signer before sending' }, { status: 400 });
+    }
+
+    // Validate signer emails and names
+    for (const s of signerData) {
+      if (!s.email || !EMAIL_REGEX.test(s.email)) {
+        return NextResponse.json({ error: `Invalid email format for signer: ${s.email || '(empty)'}` }, { status: 400 });
+      }
+      if (!s.name || s.name.trim().length === 0) {
+        return NextResponse.json({ error: 'Signer name is required' }, { status: 400 });
+      }
+      s.name = sanitizeString(s.name, 100);
+    }
+
+    // Validate CC recipient emails
+    if (ccRecipients && ccRecipients.length > 0) {
+      for (const cc of ccRecipients) {
+        if (!cc.email || !EMAIL_REGEX.test(cc.email)) {
+          return NextResponse.json({ error: `Invalid email format for CC: ${cc.email || '(empty)'}` }, { status: 400 });
+        }
+      }
     }
 
     const document = await db.document.findFirst({

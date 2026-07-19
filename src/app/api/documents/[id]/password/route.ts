@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -40,15 +35,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Password is required' }, { status: 400 });
     }
 
+    if (password.length > 128) {
+      return NextResponse.json({ error: 'Password must be less than 128 characters' }, { status: 400 });
+    }
+
     const document = await db.document.findFirst({
       where: { id, ownerId: payload.userId as string },
     });
 
     if (!document) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
+    // Note: filePassword is stored for PDF encryption/decryption purposes
+    // It cannot be hashed as the actual value is needed to unlock the PDF
     await db.document.update({
       where: { id },
-      data: { filePassword: password },
+      data: { filePassword: password.trim() },
     });
 
     await db.auditLog.create({

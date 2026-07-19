@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // POST /api/organizations/[id]/permission-templates/[templateId]/apply - Apply template to a member
 export async function POST(
@@ -50,7 +45,7 @@ export async function POST(
     }>;
 
     // Apply permissions to target user
-    const grantedPermissions = [];
+    const grantedPermissions: { id: string }[] = [];
     for (const perm of permissions) {
       try {
         const existing = await db.permission.findFirst({

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { hashPassword, verifyToken } from '@/lib/auth';
+import { hashPassword } from '@/lib/auth';
 
 // Setup password for invited sub-member (first login)
 export async function POST(req: NextRequest) {

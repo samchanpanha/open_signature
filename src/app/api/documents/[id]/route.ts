@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { readFile, unlink } from 'fs/promises';
-import path from 'path';
-import { getUserRole, hasPermission } from '@/lib/permissions';
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions';
+import { deletePdfStorage } from '@/lib/s3';
 
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 async function checkDocumentAccess(userId: string, documentId: string, action: 'read' | 'update' | 'delete' = 'read') {
   const document = await db.document.findUnique({
     where: { id: documentId },
-    select: { ownerId: true, organizationId: true },
+    select: { ownerId: true, organizationId: true, originalPdfPath: true, signedPdfPath: true },
   });
 
   if (!document) return { allowed: false, document: null };
@@ -137,13 +128,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     // Clean up files
-    try {
-      await unlink(path.join(UPLOADS_DIR, document.originalPdfPath));
-    } catch {}
+    await deletePdfStorage(document.originalPdfPath);
     if (document.signedPdfPath) {
-      try {
-        await unlink(path.join(UPLOADS_DIR, document.signedPdfPath));
-      } catch {}
+      await deletePdfStorage(document.signedPdfPath);
     }
 
     await db.document.delete({ where: { id } });

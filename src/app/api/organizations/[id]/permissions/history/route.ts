@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // GET /api/organizations/[id]/permissions/history - Get permission change history
 export async function GET(
@@ -70,8 +65,8 @@ export async function GET(
       history: auditLogs.map(log => ({
         id: log.id,
         userId: log.userId,
-        userName: log.user.name,
-        userEmail: log.user.email,
+        userName: log.user?.name || 'Unknown',
+        userEmail: log.user?.email || 'Unknown',
         action: log.action,
         details: log.details,
         createdAt: log.createdAt,

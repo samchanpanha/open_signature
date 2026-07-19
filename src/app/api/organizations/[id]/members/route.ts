@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken, hashPassword } from '@/lib/auth';
+import { hashPassword } from '@/lib/auth'
 import crypto from 'crypto';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 const MANAGEABLE_ROLES = ['admin', 'editor', 'signer', 'viewer', 'member'];
 
@@ -89,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!targetUser) {
       // Auto-create user account with provided or generated password
       tempPassword = password || crypto.randomBytes(8).toString('hex');
-      const hashedPassword = await hashPassword(tempPassword);
+      const hashedPassword = await hashPassword(tempPassword!);
 
       targetUser = await db.user.create({
         data: {
@@ -132,8 +128,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       createdAt: member.createdAt,
       user: member.user,
       inviter: member.inviter,
-      ...(isNewUser && tempPassword && { tempPassword }),
       isNewUser,
+      // Note: temp password is sent via email, not returned in response for security
     }, { status: 201 });
   } catch (error) {
     console.error('Invite member error:', error);

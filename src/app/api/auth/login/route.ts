@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword, generateToken } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/rate-limit';
+
+const LOGIN_RATE_LIMIT = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,6 +12,18 @@ export async function POST(req: NextRequest) {
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
+    }
+
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+    const rateLimitKey = `login:${email}:${ip}`;
+    const { allowed, retryAfterMs } = checkRateLimit(rateLimitKey, LOGIN_RATE_LIMIT, LOGIN_WINDOW_MS);
+
+    if (!allowed) {
+      const retryAfterSeconds = Math.ceil(retryAfterMs / 1000);
+      return NextResponse.json(
+        { error: `Too many login attempts. Try again in ${retryAfterSeconds} seconds.` },
+        { status: 429, headers: { 'Retry-After': String(retryAfterSeconds) } }
+      );
     }
 
     const user = await db.user.findUnique({ where: { email } });

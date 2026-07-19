@@ -94,7 +94,21 @@ export default function UsersPage() {
       return;
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newUserEmail)) {
+      toast.error('Invalid email format');
+      return;
+    }
+
+    if (newUserPassword && newUserPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
     try {
+      // Generate a random password if none provided
+      const tempPassword = newUserPassword || Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+
       // First, create the user account
       const registerRes = await fetch('/api/auth/register', {
         method: 'POST',
@@ -104,7 +118,7 @@ export default function UsersPage() {
         body: JSON.stringify({
           email: newUserEmail,
           name: newUserName || newUserEmail.split('@')[0],
-          password: newUserPassword || Math.random().toString(36).slice(-8),
+          password: tempPassword,
         }),
       });
 

@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import path from 'path';
-import { readFile, writeFile } from 'fs/promises';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+import { readPdfStorage, writePdfStorage } from '@/lib/s3';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   try {
@@ -75,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     });
 
     if (allSigned && document) {
-      const pdfBytes = await readFile(path.join(UPLOADS_DIR, document.originalPdfPath));
+      const pdfBytes = await readPdfStorage(document.originalPdfPath);
       const pdfDoc = await PDFDocument.load(pdfBytes);
       const pages = pdfDoc.getPages();
 
@@ -115,7 +112,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
                 x: Math.max(0, pdfX + 4),
                 y: Math.max(0, pdfY + fontSize * 0.3),
                 size: fontSize,
-                color: { r: 0, g: 0, b: 0.27 },
+                color: rgb(0, 0, 0.27),
               });
             }
           } catch (err) {
@@ -126,7 +123,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
       const signedBytes = await pdfDoc.save();
       const signedFileName = `signed-${document.id}.pdf`;
-      await writeFile(path.join(UPLOADS_DIR, signedFileName), signedBytes);
+      await writePdfStorage(signedFileName, Buffer.from(signedBytes));
 
       // Update status to Completed BEFORE generating certificate
       await db.document.update({

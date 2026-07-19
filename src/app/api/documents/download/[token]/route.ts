@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { readFile } from 'fs/promises';
-import path from 'path';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+import { readPdfStorage, isS3Configured, getSignedDownloadUrl } from '@/lib/s3';
 
 // GET /api/documents/download/[token] - Download file by time-limited token
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
@@ -20,32 +17,35 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     }
 
     if (new Date() > link.expiresAt) {
-      // Clean up expired link
       await db.downloadLink.delete({ where: { id: link.id } });
       return NextResponse.json({ error: 'Download link has expired' }, { status: 410 });
     }
 
     const doc = link.document;
+    let storageKey: string;
     let fileName: string;
-    let filePath: string;
 
     if (link.type === 'signed_pdf') {
       if (!doc.signedPdfPath) {
         return NextResponse.json({ error: 'Signed PDF not available' }, { status: 404 });
       }
       fileName = `${doc.title}-signed.pdf`;
-      filePath = path.join(UPLOADS_DIR, doc.signedPdfPath);
+      storageKey = doc.signedPdfPath;
     } else {
       if (!doc.certificatePath) {
         return NextResponse.json({ error: 'Certificate not available' }, { status: 404 });
       }
       fileName = `${doc.title}-certificate.pdf`;
-      filePath = path.join(UPLOADS_DIR, doc.certificatePath);
+      storageKey = doc.certificatePath;
     }
 
-    const fileBuffer = await readFile(filePath);
+    if (isS3Configured()) {
+      const signedUrl = await getSignedDownloadUrl(storageKey, 900);
+      await db.downloadLink.delete({ where: { id: link.id } });
+      return NextResponse.redirect(signedUrl);
+    }
 
-    // Delete the link (single-use)
+    const fileBuffer = await readPdfStorage(storageKey);
     await db.downloadLink.delete({ where: { id: link.id } });
 
     return new NextResponse(fileBuffer, {

@@ -63,3 +63,34 @@ export async function dispatchWebhook(orgId: string, event: string, payload: obj
     console.error('Webhook dispatch error:', err);
   }
 }
+
+export async function triggerWebhooks(userId: string, event: string, payload: Record<string, any>) {
+  try {
+    const webhooks = await db.webhook.findMany({
+      where: { createdBy: userId, isActive: true, events: { contains: event } },
+    });
+
+    for (const webhook of webhooks) {
+      try {
+        const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
+        const signature = webhook.secret
+          ? crypto.createHmac('sha256', webhook.secret).update(body).digest('hex')
+          : undefined;
+
+        await fetch(webhook.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(signature && { 'X-Webhook-Signature': signature }),
+          },
+          body,
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch {
+        // Don't throw on webhook failure
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}

@@ -5,7 +5,7 @@ import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions';
 // GET /api/form-templates/[id] - Get a specific form template
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getAuthUser(request);
@@ -13,8 +13,9 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { id } = await params;
     const template = await db.formTemplate.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         creator: {
           select: { id: true, name: true, email: true },
@@ -48,7 +49,7 @@ export async function GET(
 // PUT /api/form-templates/[id] - Update a form template
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getAuthUser(request);
@@ -56,8 +57,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { id } = await params;
     const existing = await db.formTemplate.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -78,7 +80,7 @@ export async function PUT(
 
     // Update template
     const updated = await db.formTemplate.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         name: name || existing.name,
         description: description !== undefined ? description : existing.description,
@@ -90,13 +92,13 @@ export async function PUT(
     if (fields) {
       // Delete existing fields
       await db.formField.deleteMany({
-        where: { formTemplateId: params.id },
+        where: { formTemplateId: id },
       });
 
       // Create new fields
       await db.formField.createMany({
         data: fields.map((field: any, index: number) => ({
-          formTemplateId: params.id,
+          formTemplateId: id,
           type: field.type,
           label: field.label,
           placeholder: field.placeholder || null,
@@ -110,7 +112,7 @@ export async function PUT(
     }
 
     const final = await db.formTemplate.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         fields: {
           orderBy: { order: 'asc' },
@@ -131,7 +133,7 @@ export async function PUT(
 // DELETE /api/form-templates/[id] - Delete a form template
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getAuthUser(request);
@@ -139,8 +141,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { id } = await params;
     const existing = await db.formTemplate.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!existing) {
@@ -157,7 +160,7 @@ export async function DELETE(
     }
 
     await db.formTemplate.delete({
-      where: { id: params.id },
+      where: { id },
     });
 
     return NextResponse.json({ success: true });

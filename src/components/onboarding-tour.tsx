@@ -71,7 +71,7 @@ export default function OnboardingTour() {
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
         >
-          <Card className="w-[420px] shadow-2xl">
+          <Card className="w-[calc(100%-2rem)] max-w-[420px] mx-4 shadow-2xl">
             <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -90,7 +90,7 @@ export default function OnboardingTour() {
                     ))}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={handleDismiss} className="h-6 w-6 p-0">
+                <Button variant="ghost" size="sm" onClick={handleDismiss} className="h-8 w-8 p-0" aria-label="Dismiss tour">
                   <X className="w-4 h-4" />
                 </Button>
               </div>
@@ -103,17 +103,17 @@ export default function OnboardingTour() {
               <div className="flex items-center justify-between">
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="default"
                   onClick={() => setCurrentStep((prev) => Math.max(0, prev - 1))}
                   disabled={currentStep === 0}
                 >
                   <ChevronLeft className="w-4 h-4 mr-1" /> Back
                 </Button>
                 <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" onClick={handleDismiss}>
+                  <Button variant="ghost" size="default" onClick={handleDismiss}>
                     Skip Tour
                   </Button>
-                  <Button size="sm" onClick={handleComplete} className="bg-emerald-600 hover:bg-emerald-700">
+                  <Button size="default" onClick={handleComplete} className="bg-emerald-600 hover:bg-emerald-700">
                     {currentStep === TOUR_STEPS.length - 1 ? (
                       <><Check className="w-4 h-4 mr-1" /> Finish</>
                     ) : (

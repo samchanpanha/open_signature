@@ -3,16 +3,33 @@
 ## In Progress
 - None currently in progress
 
+## Completed
+- Permission-based filtering for template sharing dialog
+- Bulk send improvements (replaced window.prompt with proper dialog)
+- Fixed TypeScript errors (AuthUser.id alias, async params in API routes, form-templates page props)
+- Fixed db.template → db.documentTemplate, AuditLog templateId, pdf-lib rgb(), missing imports, and 15+ more TS issues
+- Fixed team-member-manager, permission-templates apply, organization-assignment, workflow-manager, excel/pdf exporters
+- Only 2 TS errors remain (missing @aws-sdk packages - optional S3 integration)
+- Security: Removed plaintext OTP/password logging
+- UX: Added error toast for failed field updates during signing
+- Added error.tsx and not-found.tsx route boundaries
+- Removed unused imports (ScrollArea, analyticsApi, brandingApi, profileApi, onboardingApi)
+- Security: OTP codes hashed with SHA-256 before storage, timing-safe comparison
+- Security: crypto.randomInt() for OTP generation (replaced Math.random())
+- Security: JWT_SECRET now required (removed hardcoded fallback)
+- Security: OTP expiry enforced server-side (10 min window)
+- Security: Rate limiting on login (5/15min), OTP request (3/5min), OTP verify (5/10min)
+- Security: 50MB file upload size limit
+- Security: Email validation on register, contacts, document send routes
+- Security: Admin users page uses crypto for temp passwords
+- UX: Inline validation with red borders on auth form
+- Code quality: Unified 50 duplicate getAuthUser functions to single import
+- Code quality: Unified email sender addresses to use EMAIL_FROM env var
+- Code quality: Split permission-templates route into proper Next.js route structure
+- Code quality: Fixed analytics route orgId to use query params
+
 ## Next Up (from previous context)
 - Test full end-to-end flow with browser verification (invite -> setup password -> login -> see filtered docs)
-- Consider adding permission-based filtering to template sharing dialog
-
-## Nice to Have
-- Document versioning (track changes to documents over time)
-- Bulk send improvements (currently uses window.prompt, could use proper dialog)
-- Folder delete (documents in deleted folder should move to root)
-- Select all checkbox for bulk operations
-- Document drag-and-drop into folders
 
 ## Notes
 - Dev server: `npx next dev -port 3001`

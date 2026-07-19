@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
-
-function getAuthUser(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return null
-  }
-  const token = authHeader.split(' ')[1]
-  return verifyToken(token)
-}
+import { getAuthUser } from '@/lib/permissions'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = getAuthUser(request)
@@ -21,8 +12,9 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { id } = await params;
     const template = await db.documentTemplate.findUnique({
-      where: { id: params.id },
+      where: { id },
       select: { id: true, allowOfflineSign: true },
     })
 
@@ -39,7 +31,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = getAuthUser(request)
@@ -47,6 +39,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const { id } = await params;
     const body = await request.json()
     const { allowOfflineSign } = body
 
@@ -58,20 +51,20 @@ export async function PUT(
     }
 
     const template = await db.documentTemplate.findUnique({
-      where: { id: params.id },
-      select: { id: true, userId: true },
+      where: { id },
+      select: { id: true, ownerId: true },
     })
 
     if (!template) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 })
     }
 
-    if (template.userId !== user.id) {
+    if (template.ownerId !== user.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const updated = await db.documentTemplate.update({
-      where: { id: params.id },
+      where: { id },
       data: { allowOfflineSign },
       select: { id: true, allowOfflineSign: true },
     })

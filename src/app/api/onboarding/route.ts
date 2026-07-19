@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { getAuthUser } from '@/lib/permissions'
 
 const ONBOARDING_STEPS = [
   'upload_doc',
@@ -11,15 +11,6 @@ const ONBOARDING_STEPS = [
   'setup_org',
   'invite_member',
 ]
-
-function getAuthUser(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return null
-  }
-  const token = authHeader.split(' ')[1]
-  return verifyToken(token)
-}
 
 export async function GET(request: NextRequest) {
   try {

@@ -191,7 +191,7 @@ export interface SignerInfo {
 export const documentsApi = {
   list: (orgId?: string | null, search?: string, signerEmail?: string, folderId?: string | null) => {
     const params = new URLSearchParams();
-    if (orgId !== undefined) params.set('orgId', orgId);
+    if (orgId !== undefined && orgId !== null) params.set('orgId', orgId);
     if (search) params.set('search', search);
     if (signerEmail) params.set('signerEmail', signerEmail);
     if (folderId !== undefined) params.set('folderId', folderId || '');

@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { AlertEngine } from '@/lib/alerts/alert-engine';
+import { getAuthUser } from '@/lib/permissions'
 
 const alertEngine = new AlertEngine();
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // POST /api/organizations/[orgId]/members/[memberId]/invite - Send invite notification
 export async function POST(
@@ -81,7 +76,7 @@ export async function POST(
     `;
 
     await alertEngine.sendEmail({
-      from: process.env.SMTP_FROM || 'OpenSignature <noreply@opesignature.com>',
+      from: process.env.EMAIL_FROM || 'OpenSignature <noreply@example.com>',
       to: member.user.email,
       subject: `You've been invited to join ${org.name}`,
       html: emailHtml,

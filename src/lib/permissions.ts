@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 
 export interface AuthUser {
+  id: string;
   userId: string;
   email: string;
   name: string;
@@ -85,6 +86,7 @@ export function getAuthUser(req: NextRequest): AuthUser | null {
   if (!payload || !payload.userId) return null;
   
   return {
+    id: payload.userId as string,
     userId: payload.userId as string,
     email: payload.email as string,
     name: payload.name as string,

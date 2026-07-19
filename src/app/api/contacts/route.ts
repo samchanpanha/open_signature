@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/permissions';
+import { isValidEmail, sanitizeString } from '@/lib/validation';
 
 export async function GET(request: NextRequest) {
   try {
@@ -41,12 +42,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!isValidEmail(email)) {
+      return NextResponse.json(
+        { error: 'Invalid email format' },
+        { status: 400 }
+      );
+    }
+
     const contact = await db.contact.create({
       data: {
-        name,
-        email,
-        phone: phone || null,
-        company: company || null,
+        name: sanitizeString(name, 100),
+        email: email.toLowerCase().trim(),
+        phone: phone ? sanitizeString(phone, 20) : null,
+        company: company ? sanitizeString(company, 100) : null,
         userId: user.userId,
       },
     });

@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import path from 'path';
-import { readFile } from 'fs/promises';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+import { readPdfStorage, isS3Configured, getSignedDownloadUrl } from '@/lib/s3';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   try {
@@ -16,8 +13,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
     if (!signer) return NextResponse.json({ error: 'Invalid signing link' }, { status: 404 });
 
-    const filePath = path.join(UPLOADS_DIR, signer.document.originalPdfPath);
-    const fileBuffer = await readFile(filePath);
+    if (isS3Configured()) {
+      const signedUrl = await getSignedDownloadUrl(signer.document.originalPdfPath, 3600);
+      return NextResponse.redirect(signedUrl);
+    }
+
+    const fileBuffer = await readPdfStorage(signer.document.originalPdfPath);
 
     return new NextResponse(fileBuffer, {
       headers: {

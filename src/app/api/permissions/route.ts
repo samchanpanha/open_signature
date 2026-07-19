@@ -152,6 +152,9 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Check if the requesting user has permission to revoke permissions
+    if (!permission.orgId) {
+      return NextResponse.json({ error: 'Cannot revoke permissions without an organization' }, { status: 400 });
+    }
     const requesterRole = await getUserRole(user.userId, permission.orgId);
     if (requesterRole !== 'owner' && requesterRole !== 'admin') {
       return NextResponse.json({ 

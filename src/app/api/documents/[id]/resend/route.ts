@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -37,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     for (const signer of targetSigners) {
       try {
         await alertEngine.sendEmail({
-          from: process.env.EMAIL_FROM || 'noreply@opsign.com',
+          from: process.env.EMAIL_FROM || 'noreply@example.com',
           to: signer.email,
           subject: `Sign: ${document.title} — Resent`,
           html: `<!DOCTYPE html>

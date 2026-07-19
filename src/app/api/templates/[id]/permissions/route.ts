@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { hasPermission } from '@/lib/permissions';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // GET /api/templates/[id]/permissions - Get template permissions
 export async function GET(
@@ -21,9 +15,9 @@ export async function GET(
     const { id: templateId } = await params;
     const userId = payload.userId as string;
 
-    const template = await db.template.findUnique({
+    const template = await db.documentTemplate.findUnique({
       where: { id: templateId },
-      select: { organizationId: true, ownerId: true },
+      select: { ownerId: true },
     });
     if (!template) return NextResponse.json({ error: 'Template not found' }, { status: 404 });
 
@@ -35,15 +29,6 @@ export async function GET(
       },
     });
 
-    // Get all org members if in an org
-    let orgMembers: { userId: string; role: string; user: { id: string; name: string; email: string } }[] = [];
-    if (template.organizationId) {
-      orgMembers = await db.organizationMember.findMany({
-        where: { orgId: template.organizationId, isActive: true },
-        include: { user: { select: { id: true, name: true, email: true } } },
-      });
-    }
-
     return NextResponse.json({
       permissions: permissions.map(p => ({
         id: p.id,
@@ -53,12 +38,7 @@ export async function GET(
         action: p.action,
         resource: p.resource,
       })),
-      orgMembers: orgMembers.map(m => ({
-        userId: m.userId,
-        role: m.role,
-        name: m.user.name,
-        email: m.user.email,
-      })),
+      orgMembers: [],
     });
   } catch (error) {
     console.error('Get template permissions error:', error);
@@ -84,18 +64,15 @@ export async function POST(
       return NextResponse.json({ error: 'targetUserId and action required' }, { status: 400 });
     }
 
-    const template = await db.template.findUnique({
+    const template = await db.documentTemplate.findUnique({
       where: { id: templateId },
-      select: { organizationId: true, ownerId: true },
+      select: { ownerId: true },
     });
     if (!template) return NextResponse.json({ error: 'Template not found' }, { status: 404 });
 
-    // Check if user has manage permission or is owner
-    if (template.ownerId !== userId && template.organizationId) {
-      const canManage = await hasPermission(userId, template.organizationId, 'template', 'manage');
-      if (!canManage) {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-      }
+    // Check if user is owner
+    if (template.ownerId !== userId) {
+      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
     // Create or update permission
@@ -123,8 +100,7 @@ export async function POST(
       data: {
         userId,
         action: 'permission_granted',
-        details: `Granted ${action} permission on template to user ${targetUserId}`,
-        templateId,
+        details: `Granted ${action} permission on template ${templateId} to user ${targetUserId}`,
       },
     });
 
@@ -154,18 +130,15 @@ export async function DELETE(
       return NextResponse.json({ error: 'userId and action required' }, { status: 400 });
     }
 
-    const template = await db.template.findUnique({
+    const template = await db.documentTemplate.findUnique({
       where: { id: templateId },
-      select: { organizationId: true, ownerId: true },
+      select: { ownerId: true },
     });
     if (!template) return NextResponse.json({ error: 'Template not found' }, { status: 404 });
 
     // Check permissions
-    if (template.ownerId !== userId && template.organizationId) {
-      const canManage = await hasPermission(userId, template.organizationId, 'template', 'manage');
-      if (!canManage) {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-      }
+    if (template.ownerId !== userId) {
+      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
     await db.permission.deleteMany({
@@ -177,8 +150,7 @@ export async function DELETE(
       data: {
         userId,
         action: 'permission_revoked',
-        details: `Revoked ${action} permission on template from user ${targetUserId}`,
-        templateId,
+        details: `Revoked ${action} permission on template ${templateId} from user ${targetUserId}`,
       },
     });
 

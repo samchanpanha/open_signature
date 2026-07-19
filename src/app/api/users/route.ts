@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, getUserRole } from '@/lib/permissions';
 import { hashPassword } from '@/lib/auth';
+import crypto from 'crypto';
 
 // GET /api/users?orgId=xxx - List all users in an organization
 export async function GET(req: NextRequest) {
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     if (!targetUser) {
       // Create new user with temporary password
-      const tempPassword = Math.random().toString(36).slice(-8);
+      const tempPassword = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
       const hashedPassword = await hashPassword(tempPassword);
       
       targetUser = await db.user.create({
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
       });
 
       // In production, send email with temp password
-      console.log(`New user created: ${email}, temp password: ${tempPassword}`);
+      console.log(`New user created: ${email} (temp password generated)`);
     }
 
     // Check if already a member

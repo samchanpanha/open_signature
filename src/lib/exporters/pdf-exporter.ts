@@ -13,7 +13,7 @@ export interface PDFOptions {
 }
 
 export class PDFExporter {
-  private doc: PDFDocument;
+  private doc: typeof PDFDocument.prototype;
   private options: PDFOptions;
 
   constructor(options: PDFOptions) {

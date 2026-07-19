@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
       docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     }[format.toLowerCase()] || 'application/octet-stream';
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${document.title}.${format}"`,

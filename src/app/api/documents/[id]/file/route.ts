@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import path from 'path';
-import { readFile } from 'fs/promises';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
+import { getAuthUser } from '@/lib/permissions';
+import { readPdfStorage, isS3Configured, getSignedDownloadUrl } from '@/lib/s3';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,8 +15,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (!document) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
-    const filePath = path.join(UPLOADS_DIR, document.originalPdfPath);
-    const fileBuffer = await readFile(filePath);
+    if (isS3Configured()) {
+      const signedUrl = await getSignedDownloadUrl(document.originalPdfPath, 3600);
+      return NextResponse.redirect(signedUrl);
+    }
+
+    const fileBuffer = await readPdfStorage(document.originalPdfPath);
 
     return new NextResponse(fileBuffer, {
       headers: {

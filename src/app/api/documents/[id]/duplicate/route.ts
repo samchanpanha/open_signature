@@ -1,18 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { getUserRole, hasPermission } from '@/lib/permissions';
-import path from 'path';
-import { copyFile } from 'fs/promises';
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions';
+import { copyPdfStorage } from '@/lib/s3';
 import { randomUUID } from 'crypto';
 
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -45,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Copy the PDF file
     const newFileId = randomUUID();
     const newPdfPath = `${newFileId}.pdf`;
-    await copyFile(path.join(UPLOADS_DIR, original.originalPdfPath), path.join(UPLOADS_DIR, newPdfPath));
+    await copyPdfStorage(original.originalPdfPath, newPdfPath);
 
     // Create duplicated document (owned by current user)
     const duplicated = await db.document.create({

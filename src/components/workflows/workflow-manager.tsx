@@ -15,7 +15,7 @@ import {
   Check, X, Settings, Play, Pause, Copy, Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { workflowsApi, orgApi, type WorkflowListItem, type WorkflowStep, type OrgMember } from '@/lib/api';
+import { workflowsApi, orgApi, type WorkflowListItem, type WorkflowDetail, type WorkflowStep, type OrgMember } from '@/lib/api';
 
 interface WorkflowManagerProps {
   orgId: string;
@@ -28,7 +28,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowListItem | null>(null);
+  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDetail | null>(null);
 
   // Create form state
   const [newName, setNewName] = useState('');
@@ -176,7 +176,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                 <div
                   key={wf.id}
                   className="border rounded-lg p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => { setSelectedWorkflow(wf); setDetailOpen(true); }}
+                  onClick={() => { setSelectedWorkflow(wf as WorkflowDetail); setDetailOpen(true); }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -264,6 +264,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                             className="h-5 w-5"
                             disabled={i === 0}
                             onClick={() => moveStep(i, 'up')}
+                            aria-label="Move step up"
                           >
                             <GripVertical className="w-3 h-3" />
                           </Button>
@@ -273,6 +274,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                             className="h-5 w-5"
                             disabled={i === newSteps.length - 1}
                             onClick={() => moveStep(i, 'down')}
+                            aria-label="Move step down"
                           >
                             <GripVertical className="w-3 h-3" />
                           </Button>
@@ -304,7 +306,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                           <SelectContent>
                             {members.map(m => (
                               <SelectItem key={m.user.id} value={m.user.id}>
-                                {m.user.name} ({m.user.role})
+                                {m.user.name} ({m.role})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -314,6 +316,7 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                           size="icon"
                           className="shrink-0 text-destructive"
                           onClick={() => removeStep(i)}
+                          aria-label="Remove step"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>

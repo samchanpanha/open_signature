@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { getUserRole, hasPermission } from '@/lib/permissions';
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -65,7 +59,7 @@ export async function POST(req: NextRequest) {
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const userId = payload.userId as string;
-    const { name, fieldConfig, orgId } = await req.json();
+    const { name, fieldConfig, roles, orgId } = await req.json();
     if (!name || !fieldConfig) {
       return NextResponse.json({ error: 'Name and field config required' }, { status: 400 });
     }
@@ -89,6 +83,7 @@ export async function POST(req: NextRequest) {
       data: {
         name,
         fieldConfig: JSON.stringify(fieldConfig),
+        roles: roles ? JSON.stringify(roles) : "[]",
         ownerId: userId,
       },
     });

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { PDFDocument } from 'pdf-lib';
-import { getUserRole, hasPermission } from '@/lib/permissions';
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions';
+import { isS3Configured, uploadToS3 } from '@/lib/s3';
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.docx'];
 const MIME_MAP: Record<string, string> = {
@@ -17,11 +18,6 @@ const MIME_MAP: Record<string, string> = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
 };
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -110,13 +106,13 @@ export async function GET(req: NextRequest) {
         _count: { select: { signers: true } },
         signers: { where: { signedAt: { not: null } }, select: { id: true } },
         owner: { select: { id: true, name: true, email: true } },
-        organization: orgId ? {
-          select: {
+        organization: {
+          include: {
             members: {
               select: { userId: true, role: true },
             },
           },
-        } : false,
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -165,6 +161,10 @@ export async function POST(req: NextRequest) {
     const userId = payload.userId as string;
 
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: 'File size exceeds 50MB limit' }, { status: 400 });
+    }
 
     const ext = path.extname(file.name).toLowerCase();
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
@@ -224,14 +224,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await mkdir(UPLOADS_DIR, { recursive: true });
-    const filePath = path.join(UPLOADS_DIR, filename);
-    await writeFile(filePath, buffer);
+    let storageKey = filename;
+
+    if (isS3Configured()) {
+      const s3Key = `documents/${userId}/${filename}`;
+      await uploadToS3(s3Key, buffer, 'application/pdf');
+      storageKey = s3Key;
+    } else {
+      await mkdir(UPLOADS_DIR, { recursive: true });
+      const filePath = path.join(UPLOADS_DIR, filename);
+      await writeFile(filePath, buffer);
+    }
 
     const document = await db.document.create({
       data: {
         title,
-        originalPdfPath: filename,
+        originalPdfPath: storageKey,
         ownerId: userId,
         status: 'Draft',
         ...(orgIdStr ? { organizationId: orgIdStr } : {}),

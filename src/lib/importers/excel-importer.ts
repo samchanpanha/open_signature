@@ -16,7 +16,7 @@ export interface ImportResult {
 export class ExcelImporter {
   private workbook: ExcelJS.Workbook | null = null;
 
-  async load(buffer: Buffer): Promise<ImportResult> {
+  async load(buffer: Buffer | ArrayBuffer): Promise<ImportResult> {
     const result: ImportResult = {
       sheets: [],
       errors: [],
@@ -24,7 +24,7 @@ export class ExcelImporter {
 
     try {
       this.workbook = new ExcelJS.Workbook();
-      await this.workbook.xlsx.load(buffer);
+      await this.workbook.xlsx.load(buffer as any);
 
       this.workbook.eachSheet((worksheet, sheetId) => {
         const columns: string[] = [];

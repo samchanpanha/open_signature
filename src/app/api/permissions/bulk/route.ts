@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { hasPermission } from '@/lib/permissions';
+import { getAuthUser, hasPermission } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 interface BulkPermissionItem {
   userId: string;
@@ -49,7 +43,7 @@ export async function POST(req: NextRequest) {
     }
 
     const results = await db.$transaction(async (tx) => {
-      const created = [];
+      const created: string[] = [];
       
       for (const perm of permissions) {
         // Check if already exists

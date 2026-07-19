@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken, generateSignerToken } from '@/lib/auth';
-import { getUserRole, hasPermission } from '@/lib/permissions';
+import { generateSignerToken } from '@/lib/auth'
+import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

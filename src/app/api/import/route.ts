@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ExcelImporter } from '@/lib/importers/excel-importer';
 import { prisma } from '@/lib/db';
 import { getAuthUser } from '@/lib/permissions';
+import { hashPassword } from '@/lib/auth';
+import crypto from 'crypto';
 
 // POST /api/import - Import data from Excel/CSV files
 export async function POST(request: NextRequest) {
@@ -98,11 +100,13 @@ export async function POST(request: NextRequest) {
               });
 
               if (!existingUser) {
+                const tempPassword = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+                const hashedPassword = await hashPassword(tempPassword);
                 existingUser = await prisma.user.create({
                   data: {
                     email: row.email,
                     name: row.name,
-                    password: 'temp_' + Math.random().toString(36).slice(-8), // Temporary password
+                    password: hashedPassword,
                   },
                 });
               }

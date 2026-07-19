@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Plus, ArrowLeft, Loader2, Share2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ShareTemplateDialog } from '@/components/permissions/share-template-dialog';
+import { useAppStore } from '@/lib/store';
 
 interface FormTemplate {
   id: string;
@@ -25,11 +26,9 @@ interface FormTemplate {
   updatedAt: string;
 }
 
-interface FormTemplatesPageProps {
-  orgId: string;
-}
-
-export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
+export default function FormTemplatesPage() {
+  const store = useAppStore();
+  const orgId = store.currentOrgId;
   const [templates, setTemplates] = useState<FormTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -43,6 +42,10 @@ export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
 
   // Fetch templates
   const fetchTemplates = async () => {
+    if (!orgId) {
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const response = await fetch(`/api/form-templates?orgId=${orgId}`);
@@ -312,5 +315,3 @@ export function FormTemplatesPage({ orgId }: FormTemplatesPageProps) {
     </div>
   );
 }
-
-export default FormTemplatesPage;

@@ -140,7 +140,7 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
           {/* Add Permission */}
           <div className="border-t pt-4">
             <label className="text-sm font-medium mb-2 block">Grant Specific Access</label>
-            <div className="flex items-end gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
               <div className="flex-1">
                 <Select value={selectedMember} onValueChange={setSelectedMember}>
                   <SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger>
@@ -165,7 +165,7 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={handleAdd} disabled={adding || !selectedMember} size="sm">
+              <Button onClick={handleAdd} disabled={adding || !selectedMember} size="sm" aria-label="Add member">
                 <UserPlus className="w-4 h-4" />
               </Button>
             </div>
@@ -184,7 +184,7 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
                         {ACTION_OPTIONS.find(a => a.value === p.action)?.label || p.action}
                       </Badge>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => handleRemove(p.userId, p.action)} className="h-6 w-6 p-0 text-destructive">
+                    <Button variant="ghost" size="sm" onClick={() => handleRemove(p.userId, p.action)} className="h-8 w-8 p-0 text-destructive" aria-label="Remove permission">
                       <Trash2 className="w-3 h-3" />
                     </Button>
                   </div>

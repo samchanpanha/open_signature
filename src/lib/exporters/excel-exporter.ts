@@ -48,10 +48,10 @@ export class ExcelExporter {
       };
     }
 
-    return this.workbook.xlsx.writeBuffer() as Promise<Buffer>;
+    return this.workbook.xlsx.writeBuffer() as unknown as Promise<Buffer<ArrayBufferLike>>;
   }
 
-  static async export(options: ExcelOptions): Promise<Buffer> {
+  static async export(options: ExcelOptions): Promise<Buffer<ArrayBufferLike>> {
     const exporter = new ExcelExporter(options);
     return exporter.generate();
   }

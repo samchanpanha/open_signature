@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { isSmsConfigured } from '@/lib/sms';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   try {
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         role: signer.role,
         signedAt: signer.signedAt,
         otpVerified: !!signer.otpVerifiedAt,
+        phone: signer.phone || null,
         fields: signerFields.map((f) => ({
           id: f.id, type: f.type, pageNumber: f.pageNumber,
           x: f.x, y: f.y, width: f.width, height: f.height, value: f.value,
@@ -82,6 +84,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         status: signer.document.status,
         expiresAt: signer.document.expiresAt,
       },
+      smsAvailable: isSmsConfigured(),
     });
   } catch (error) {
     console.error('Sign info error:', error);

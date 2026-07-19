@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { randomBytes } from 'crypto';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // POST /api/documents/[id]/download-link - Create time-limited download link
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

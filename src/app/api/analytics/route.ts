@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
+import { getAuthUser } from '@/lib/permissions'
 
-function getAuthUser(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return verifyToken(authHeader.slice(7));
-}
 
 // GET /api/analytics - Return usage stats for the authenticated user's organization
 export async function GET(req: NextRequest) {
@@ -17,13 +12,14 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = user.userId as string;
+    const orgId = req.nextUrl.searchParams.get('orgId') || undefined;
 
     const [documents, templates, contacts, workflows, recentLogs] = await Promise.all([
       db.document.findMany({
         where: {
           OR: [
             { ownerId: userId },
-            { organizationId: user.orgId as string | undefined },
+            ...(orgId ? [{ organizationId: orgId }] : []),
           ],
         },
         include: {
@@ -42,7 +38,7 @@ export async function GET(req: NextRequest) {
         where: {
           OR: [
             { createdBy: userId },
-            { orgId: user.orgId as string | undefined },
+            ...(orgId ? [{ orgId }] : []),
           ],
         },
         select: { id: true },
@@ -52,7 +48,7 @@ export async function GET(req: NextRequest) {
           OR: [
             { userId },
             { document: { ownerId: userId } },
-            { document: { organizationId: user.orgId as string | undefined } },
+            ...(orgId ? [{ document: { organizationId: orgId } }] : []),
           ],
           createdAt: {
             gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),

@@ -83,10 +83,28 @@ model User {
   workflowSteps    WorkflowStep[]
   apiKeys          ApiKey[]
   contacts         Contact[]
+  groups           ContactGroup[]
   publicTemplates  PublicTemplate[]
   webhooks         Webhook[]
   folders          Folder[]
   usageStats       UsageStat[]
+  preferences      UserPreferences?
+  comments         DocumentComment[]
+}
+
+model UserPreferences {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  avatarUrl        String?
+  emailOnSent      Boolean  @default(true)
+  emailOnCompleted Boolean  @default(true)
+  emailOnRejected  Boolean  @default(true)
+  emailOnExpiring  Boolean  @default(true)
+  emailOnReminder  Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Document {
@@ -117,13 +135,78 @@ model Document {
   auditLogs     AuditLog[]
   templateId    String?
   template      DocumentTemplate? @relation(fields: [templateId], references: [id])
+  templateUsages TemplateUsage[]
   assignments   Assignment[]
   workflowId    String?
   workflow      SignatureWorkflow? @relation(fields: [workflowId], references: [id])
   notifications Notification[]
   reminders     Reminder[]
+  docReminders  DocumentReminder[]
   downloadLinks DownloadLink[]
   permissions   Permission[]
+  versions      DocumentVersion[]
+  tags          DocumentTag[]
+  comments      DocumentComment[]
+  shareLinks    ShareLink[]
+}
+
+model ShareLink {
+  id         String   @id @default(cuid())
+  documentId String
+  token      String   @unique
+  expiresAt  DateTime?
+  viewOnly   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+model DocumentComment {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  content    String
+  pageNumber Int?
+  x          Float?
+  y          Float?
+  resolved   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+model DocumentTag {
+  id         String   @id @default(cuid())
+  documentId String
+  name       String
+  color      String?  @default("#10b981")
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, name])
+  @@index([documentId])
+}
+
+model DocumentVersion {
+  id              String   @id @default(cuid())
+  documentId      String
+  version         Int
+  pdfPath         String
+  title           String
+  changedBy       String?
+  changeNote      String?
+  createdAt       DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, version])
 }
 
 model DocumentTemplate {
@@ -131,18 +214,33 @@ model DocumentTemplate {
   name       String
   ownerId    String
   fieldConfig String // JSON: array of field definitions
+  roles       String  @default("[]") // JSON: array of role definitions
   allowOfflineSign Boolean @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner     User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   documents Document[]
+  usage     TemplateUsage[]
+}
+
+model TemplateUsage {
+  id         String   @id @default(cuid())
+  templateId String
+  documentId String
+  usedAt     DateTime @default(now())
+
+  template DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  document Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
 }
 
 model Signer {
   id              String    @id @default(cuid())
   email           String
   name            String
+  phone           String?
   order           Int       @default(1)
   role            String    @default("signer") // signer, approver, viewer
   signedAt        DateTime?
@@ -150,7 +248,9 @@ model Signer {
   rejectionReason String?
   token           String    @unique
   otpCode         String?
+  otpMethod       String    @default("email") // email or sms
   otpVerifiedAt   DateTime?
+  otpRequestedAt  DateTime?
   documentId      String
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -258,15 +358,26 @@ model FormTemplate {
   name        String
   description String?
   schema      String   // JSON: form field definitions
+  shareToken  String?  @unique
   orgId       String
   createdBy   String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  creator     User         @relation(fields: [createdBy], references: [id])
+  org         Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator     User            @relation(fields: [createdBy], references: [id])
   fields      FormField[]
   permissions Permission[]
+  submissions FormSubmission[]
+}
+
+model FormSubmission {
+  id              String   @id @default(cuid())
+  data            String   // JSON: submitted form data
+  formTemplateId  String
+  submittedAt     DateTime @default(now())
+
+  formTemplate FormTemplate @relation(fields: [formTemplateId], references: [id], onDelete: Cascade)
 }
 
 model FormField {
@@ -370,6 +481,23 @@ model Reminder {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }
 
+model DocumentReminder {
+  id         String   @id @default(cuid())
+  documentId String
+  email      String
+  name       String?
+  intervalDays Int    @default(3)
+  lastSentAt  DateTime?
+  nextSendAt  DateTime
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([nextSendAt])
+}
+
 model PublicTemplate {
   id          String   @id @default(cuid())
   name        String
@@ -457,9 +585,34 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groups ContactGroupMember[]
 
   @@unique([userId, email])
+}
+
+model ContactGroup {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String
+  createdAt DateTime @default(now())
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts ContactGroupMember[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model ContactGroupMember {
+  id        String @id @default(cuid())
+  groupId   String
+  contactId String
+
+  group   ContactGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contact Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, contactId])
 }
 
 model Folder {

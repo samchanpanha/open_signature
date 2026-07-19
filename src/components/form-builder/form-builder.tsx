@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { DndContext, DragEndEvent, useDroppable } from '@dnd-kit/core';
+import { DndContext, DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
   verticalListSortingStrategy,
@@ -97,6 +97,7 @@ function DraggableField({ field, onEdit, onDelete }: DraggableFieldProps) {
         size="icon"
         onClick={() => onEdit(field)}
         className="h-8 w-8"
+        aria-label="Edit field settings"
       >
         <Settings className="h-4 w-4" />
       </Button>
@@ -106,6 +107,7 @@ function DraggableField({ field, onEdit, onDelete }: DraggableFieldProps) {
         size="icon"
         onClick={() => onDelete(field.id)}
         className="h-8 w-8 text-red-500 hover:text-red-700"
+        aria-label="Delete field"
       >
         <Trash2 className="h-4 w-4" />
       </Button>
