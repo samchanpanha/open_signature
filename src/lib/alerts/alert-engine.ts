@@ -4,6 +4,7 @@
 
 import { prisma } from '@/lib/db';
 import nodemailer from 'nodemailer';
+import { sendTelegramMessage, TelegramError, type InlineKeyboardButton } from '@/lib/telegram';
 
 export interface AlertConfig {
   reminderDaysBefore: number;
@@ -56,6 +57,79 @@ export class AlertEngine {
       return;
     }
     await this.transporter.sendMail(options);
+  }
+
+  /**
+   * Resolve a customizable email template for an org, falling back to the
+   * org's default template or the provided hardcoded fallback.
+   */
+  private async resolveTemplate(
+    orgId: string | undefined,
+    key: string,
+    fallbackSubject: string,
+    fallbackHtml: string,
+    vars: Record<string, string>
+  ): Promise<{ subject: string; html: string }> {
+    let subject = fallbackSubject;
+    let html = fallbackHtml;
+
+    try {
+      const where: any = {};
+      if (orgId) {
+        where.OR = [{ orgId }, { orgId: null, isDefault: true }];
+      }
+      const template = await prisma.emailTemplate.findFirst({
+        where: { ...where, name: key },
+        orderBy: orgId ? [{ orgId: 'desc' }] : undefined,
+      });
+
+      if (template) {
+        subject = this.substitute(template.subject, vars);
+        html = this.substitute(template.htmlBody, vars);
+      } else if (orgId) {
+        const fallback = await prisma.emailTemplate.findFirst({
+          where: { orgId, isDefault: true },
+        });
+        if (fallback) {
+          subject = this.substitute(fallback.subject, vars);
+          html = this.substitute(fallback.htmlBody, vars);
+        }
+      }
+    } catch (err) {
+      console.error('[AlertEngine] Failed to resolve template, using fallback:', err);
+    }
+
+    return { subject, html };
+  }
+
+  private substitute(template: string, vars: Record<string, string>): string {
+    return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key: string) => vars[key] ?? '');
+  }
+
+  /**
+   * Send a Telegram notification to a user if their chat is linked.
+   * No-op (caught) when the user has no linked Telegram account.
+   */
+  async notifyTelegram(
+    userId: string,
+    text: string,
+    buttons?: InlineKeyboardButton[]
+  ): Promise<void> {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { telegramChatId: true },
+      });
+      if (!user?.telegramChatId) return; // not linked -> skip silently
+      await sendTelegramMessage(user.telegramChatId, text, {
+        parse_mode: "Markdown",
+        ...(buttons ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
+        disable_web_page_preview: true,
+      });
+    } catch (err) {
+      const e = err as TelegramError;
+      console.error("[AlertEngine] Telegram notify failed:", e.message);
+    }
   }
 
   /**
@@ -171,19 +245,33 @@ export class AlertEngine {
       ? Math.ceil((assignment.dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
+    const orgId = assignment.org?.id;
+    const { subject, html } = await this.resolveTemplate(
+      orgId,
+      'sign_reminder',
+      `Reminder: Document signing due soon - ${assignment.document.title}`,
+      `
+        <h2>Signing Reminder</h2>
+        <p>Hello {{signerName}},</p>
+        <p>This is a friendly reminder that you have a document awaiting your signature:</p>
+        <p><strong>{{documentTitle}}</strong></p>
+        <p>Due date: {{dueDate}}</p>
+        <p>Days remaining: {{daysRemaining}}</p>
+        <p>Please complete the signing process at your earliest convenience.</p>
+      `,
+      {
+        signerName: assignment.user.name,
+        documentTitle: assignment.document.title,
+        dueDate: assignment.dueDate?.toLocaleDateString() || 'Not set',
+        daysRemaining: String(daysUntilDue),
+      }
+    );
+
     await this.sendEmail({
       from: process.env.EMAIL_FROM || 'noreply@example.com',
       to: assignment.user.email,
-      subject: `Reminder: Document signing due soon - ${assignment.document.title}`,
-      html: `
-        <h2>Signing Reminder</h2>
-        <p>Hello ${assignment.user.name},</p>
-        <p>This is a friendly reminder that you have a document awaiting your signature:</p>
-        <p><strong>${assignment.document.title}</strong></p>
-        <p>Due date: ${assignment.dueDate?.toLocaleDateString() || 'Not set'}</p>
-        <p>Days remaining: ${daysUntilDue}</p>
-        <p>Please complete the signing process at your earliest convenience.</p>
-      `,
+      subject,
+      html,
     });
 
     // Create in-app notification
@@ -198,21 +286,37 @@ export class AlertEngine {
       ? Math.ceil((new Date().getTime() - assignment.dueDate.getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
+    const orgId = assignment.org?.id;
+    const { subject, html } = await this.resolveTemplate(
+      orgId,
+      'document_overdue',
+      `OVERDUE: Document signing - ${assignment.document.title}`,
+      `
+        <h2>Overdue Document Alert</h2>
+        <p>Hello {{assignerName}},</p>
+        <p>The following document is overdue for signature:</p>
+        <p><strong>{{documentTitle}}</strong></p>
+        <p>Assigned to: {{signerName}} ({{signerEmail}})</p>
+        <p>Due date was: {{dueDate}}</p>
+        <p>Days overdue: {{daysOverdue}}</p>
+        <p>Please follow up with the assigned user.</p>
+      `,
+      {
+        assignerName: assignment.assigner.name,
+        documentTitle: assignment.document.title,
+        signerName: assignment.user.name,
+        signerEmail: assignment.user.email,
+        dueDate: assignment.dueDate?.toLocaleDateString() || 'Not set',
+        daysOverdue: String(daysOverdue),
+      }
+    );
+
     await this.sendEmail({
       from: process.env.EMAIL_FROM || 'noreply@example.com',
       to: assignment.assigner.email,
       cc: assignment.user.email,
-      subject: `OVERDUE: Document signing - ${assignment.document.title}`,
-      html: `
-        <h2>Overdue Document Alert</h2>
-        <p>Hello ${assignment.assigner.name},</p>
-        <p>The following document is overdue for signature:</p>
-        <p><strong>${assignment.document.title}</strong></p>
-        <p>Assigned to: ${assignment.user.name} (${assignment.user.email})</p>
-        <p>Due date was: ${assignment.dueDate?.toLocaleDateString() || 'Not set'}</p>
-        <p>Days overdue: ${daysOverdue}</p>
-        <p>Please follow up with the assigned user.</p>
-      `,
+      subject,
+      html,
     });
 
     // Create in-app notifications
@@ -260,7 +364,8 @@ export class AlertEngine {
     documentTitle: string,
     documentId: string,
     currentStep: number,
-    totalSteps: number
+    totalSteps: number,
+    orgId?: string
   ): Promise<void> {
     const title = 'Your Signature Required';
     const message = `Step ${currentStep}/${totalSteps}: "${step.name}" — Document "${documentTitle}" is ready for your signature.`;
@@ -276,23 +381,59 @@ export class AlertEngine {
       },
     });
 
+    // Send Telegram notification with a direct "Sign Document" button
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const stepUser = await prisma.user.findUnique({
+      where: { id: step.userId },
+      select: { email: true },
+    });
+    const signer = stepUser
+      ? await prisma.signer.findFirst({
+          where: { documentId, email: stepUser.email },
+          orderBy: { order: 'asc' },
+          select: { token: true },
+        })
+      : null;
+    if (signer) {
+      await this.notifyTelegram(
+        step.userId,
+        `✍️ *Signature required*\nStep ${currentStep}/${totalSteps}: "${step.name}"\nDocument: *${documentTitle}*`,
+        [{ text: 'Sign Document', callback_data: `open:${signer.token}` }]
+      );
+    }
+
     // Send email notification
     const user = await prisma.user.findUnique({ where: { id: step.userId } });
     if (user) {
       try {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const { subject, html } = await this.resolveTemplate(
+          orgId,
+          'workflow_step',
+          `[Step ${currentStep}/${totalSteps}] Signature Required: ${documentTitle}`,
+          `
+            <h2>Workflow Step: ${step.name}</h2>
+            <p>Hello {{signerName}},</p>
+            <p>A document requires your signature as part of a signing workflow.</p>
+            <p><strong>Document:</strong> {{documentTitle}}</p>
+            <p><strong>Step:</strong> {{currentStep}} of {{totalSteps}} — {{stepName}}</p>
+            <p>Please review and sign the document at your earliest convenience.</p>
+            <p><a href="{{appUrl}}">Open Application</a></p>
+          `,
+          {
+            signerName: user.name,
+            documentTitle,
+            currentStep: String(currentStep),
+            totalSteps: String(totalSteps),
+            stepName: step.name,
+            appUrl,
+          }
+        );
         await this.sendEmail({
           from: process.env.EMAIL_FROM || 'noreply@example.com',
           to: user.email,
-          subject: `[Step ${currentStep}/${totalSteps}] Signature Required: ${documentTitle}`,
-          html: `
-            <h2>Workflow Step: ${step.name}</h2>
-            <p>Hello ${user.name},</p>
-            <p>A document requires your signature as part of a signing workflow.</p>
-            <p><strong>Document:</strong> ${documentTitle}</p>
-            <p><strong>Step:</strong> ${currentStep} of ${totalSteps} — ${step.name}</p>
-            <p>Please review and sign the document at your earliest convenience.</p>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}">Open Application</a></p>
-          `,
+          subject,
+          html,
         });
       } catch (error) {
         console.error('Failed to send workflow step email:', error);
@@ -307,7 +448,8 @@ export class AlertEngine {
     ownerId: string,
     documentTitle: string,
     documentId: string,
-    status: string
+    status: string,
+    orgId?: string
   ): Promise<void> {
     let title = '';
     let message = '';
@@ -336,19 +478,38 @@ export class AlertEngine {
       },
     });
 
+    // Notify owner over Telegram (Markdown)
+    await this.notifyTelegram(
+      ownerId,
+      `📄 *${title}*\n"${documentTitle}"`
+    );
+
     const user = await prisma.user.findUnique({ where: { id: ownerId } });
     if (user) {
       try {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const { subject, html } = await this.resolveTemplate(
+          orgId,
+          `document_${status}`,
+          `[${status.toUpperCase()}] ${documentTitle}`,
+          `
+            <h2>Document ${status.charAt(0).toUpperCase() + status.slice(1)}</h2>
+            <p>Hello {{ownerName}},</p>
+            <p>The document <strong>"{{documentTitle}}"</strong> has been {{status}}.</p>
+            <p><a href="{{appUrl}}">View Document</a></p>
+          `,
+          {
+            ownerName: user.name,
+            documentTitle,
+            status,
+            appUrl,
+          }
+        );
         await this.sendEmail({
           from: process.env.EMAIL_FROM || 'noreply@example.com',
           to: user.email,
-          subject: `[${status.toUpperCase()}] ${documentTitle}`,
-          html: `
-            <h2>Document ${status.charAt(0).toUpperCase() + status.slice(1)}</h2>
-            <p>Hello ${user.name},</p>
-            <p>The document <strong>"${documentTitle}"</strong> has been ${status}.</p>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}">View Document</a></p>
-          `,
+          subject,
+          html,
         });
       } catch (error) {
         console.error('Failed to send document owner email:', error);

@@ -54,7 +54,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       signer.document.ownerId,
       signer.document.title,
       signer.document.id,
-      'rejected'
+      'rejected',
+      signer.document.organizationId ?? undefined
     );
 
     // Dispatch webhook

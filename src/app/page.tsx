@@ -9,7 +9,8 @@ import {
   Sun, Moon, Search, CopyPlus, BookmarkPlus, Star, Ban, Award,
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
   GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle,
-  Share2, FolderOpen, FileEdit, History, Bell, GitCompareArrows, Mail
+  Share2, FolderOpen, FileEdit, History, Bell, GitCompareArrows, Mail,
+  Palette, Workflow, Contact as ContactIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import OnboardingTour from '@/components/onboarding-tour';
@@ -38,6 +40,10 @@ import { DocumentComparison } from '@/components/document-comparison';
 import { DocumentReminders } from '@/components/document-reminders';
 import { ExpiryWarnings } from '@/components/expiry-warnings';
 import { WebhookManager } from '@/components/webhook-manager';
+import { WorkflowManager } from '@/components/workflows/workflow-manager';
+import { ContactGroupsManager } from '@/components/contacts/contact-groups-manager';
+import { BrandLogo } from '@/components/brand-logo';
+import { brandingApi } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/dashboard-skeleton';
 import { DocumentSkeleton } from '@/components/document-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -48,7 +54,7 @@ import { QuickShareDialog } from '@/components/quick-share-dialog';
 import { VersionDiff } from '@/components/version-diff';
 import { SigningOrder } from '@/components/signing-order';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, type OrgListItem, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, type OrgListItem, type DocumentListItem,   type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -355,6 +361,7 @@ export default function Home() {
   const [sending, setSending] = useState(false);
   const [signSelfLoading, setSignSelfLoading] = useState(false);
   const [expiryDate, setExpiryDate] = useState('');
+  const [requireOtp, setRequireOtp] = useState(false);
   const [ccRecipients, setCcRecipients] = useState<CcRecipient[]>([]);
   const [newCcName, setNewCcName] = useState('');
   const [newCcEmail, setNewCcEmail] = useState('');
@@ -475,7 +482,13 @@ export default function Home() {
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Org Settings Tabs
-  const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates'>('members');
+  const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates' | 'branding' | 'workflows' | 'contacts'>('members');
+  const [brandingForm, setBrandingForm] = useState<{ name: string; logoUrl: string; brandColor: string; customDomain: string }>({ name: '', logoUrl: '', brandColor: '#10b981', customDomain: '' });
+  const [brandingSaving, setBrandingSaving] = useState(false);
+  const [showCreateKey, setShowCreateKey] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>([]);
+  const [newKeyPlain, setNewKeyPlain] = useState<string | null>(null);
   const [orgWebhooks, setOrgWebhooks] = useState<Webhook[]>([]);
   const [orgEmailTemplates, setOrgEmailTemplates] = useState<EmailTemplate[]>([]);
   const [orgApiKeys, setOrgApiKeys] = useState<ApiKey[]>([]);
@@ -639,6 +652,12 @@ export default function Home() {
     try {
       const detail = await orgApi.get(orgId);
       setOrgDetail(detail);
+      setBrandingForm({
+        name: detail.name || '',
+        logoUrl: detail.logoUrl || '',
+        brandColor: detail.brandColor || '#10b981',
+        customDomain: detail.customDomain || '',
+      });
     } catch (err: any) {
       toast.error(err.message || 'Failed to load organization');
       store.closeOrgSettings();
@@ -1234,6 +1253,8 @@ export default function Home() {
         ccRecipients.length > 0 ? ccRecipients : undefined,
         expiryDate || undefined,
         selectedWorkflowId || undefined,
+        undefined,
+        requireOtp,
       );
       toast.success('Document sent for signing!');
       store.setView('dashboard');
@@ -2258,13 +2279,10 @@ export default function Home() {
         <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 gradient-primary rounded-lg flex items-center justify-center shadow-sm">
-                <FileSignature className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-bold text-lg">OpenSign</span>
+              <BrandLogo />
             </div>
             <div className="flex items-center gap-2">
-              {/* Org Selector Dropdown */}
+            {/* Org Selector Dropdown */}
               <div className="relative">
                 <Button
                   variant="outline"
@@ -2662,8 +2680,20 @@ export default function Home() {
                       a.click();
                       toast.success('Documents exported');
                     }}
-                    onBulkTag={(tag: string) => {
-                      toast.success(`Tag "${tag}" added to ${selectedDocs.size} document(s)`);
+                    onBulkTag={async (tag: string) => {
+                      try {
+                        const ids = Array.from(selectedDocs);
+                        let added = 0;
+                        for (const docId of ids) {
+                          const res = await documentsApi.addTag(docId, tag);
+                          if (res && res.tag) added++;
+                        }
+                        await loadDocuments();
+                        toast.success(`Tag "${tag}" added to ${added} document(s)`);
+                        setSelectedDocs(new Set());
+                      } catch (err: any) {
+                        toast.error(err.message || 'Failed to add tag');
+                      }
                     }}
                     folders={folders.map(f => ({ id: f.id, name: f.name }))}
                     documents={filteredDocuments.filter(d => selectedDocs.has(d.id))}
@@ -2772,7 +2802,7 @@ export default function Home() {
                             a.download = `${doc.title}-signed.pdf`;
                             a.click();
                           } : undefined}
-                          onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? (e) => handleExportFormData(e, doc.id, doc.title) : undefined}
+                          onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? () => { handleExportFormData({} as React.MouseEvent, doc.id, doc.title); } : undefined}
                           onShare={doc.organizationId ? () => { setSharingDocId(doc.id); setSharingDocTitle(doc.title); } : undefined}
                           onMove={doc.organizationId && folders.length > 0 ? () => { setMovingDocId(doc.id); } : undefined}
                           onDuplicate={() => handleDuplicateDoc({ stopPropagation: () => {} } as React.MouseEvent, doc.id)}
@@ -2820,6 +2850,19 @@ export default function Home() {
                       </div>
                     )}
                     <StatusBadge status={doc.status} />
+                    {doc.tags && doc.tags.length > 0 && (
+                      <div className="hidden lg:flex items-center gap-1 flex-wrap">
+                        {doc.tags.map((t) => (
+                          <span
+                            key={t.id}
+                            className="text-[10px] px-1.5 py-0.5 rounded-full border"
+                            style={{ borderColor: t.color || '#10b981', color: t.color || '#10b981' }}
+                          >
+                            {t.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <DocumentActionsMenu
                         document={doc}
@@ -2837,7 +2880,7 @@ export default function Home() {
                           a.download = `${doc.title}-signed.pdf`;
                           a.click();
                         } : undefined}
-                        onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? (e) => handleExportFormData(e, doc.id, doc.title) : undefined}
+                        onExport={(doc.status === 'Sent' || doc.status === 'Signing' || doc.status === 'Completed') ? () => { handleExportFormData({} as React.MouseEvent, doc.id, doc.title); } : undefined}
                         onShare={doc.organizationId ? () => { setSharingDocId(doc.id); setSharingDocTitle(doc.title); } : undefined}
                         onMove={doc.organizationId && folders.length > 0 ? () => { setMovingDocId(doc.id); } : undefined}
                         onDuplicate={() => handleDuplicateDoc({ stopPropagation: () => {} } as React.MouseEvent, doc.id)}
@@ -3075,8 +3118,11 @@ export default function Home() {
 
                 {/* Settings Tabs */}
                 <Tabs value={orgSettingsTab} onValueChange={(v) => setOrgSettingsTab(v as any)}>
-                  <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-4">
+                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-7 mb-4">
                     <TabsTrigger value="members" className="text-xs"><Users className="w-3 h-3 mr-1" /> Members</TabsTrigger>
+                    <TabsTrigger value="branding" className="text-xs"><Palette className="w-3 h-3 mr-1" /> Brand</TabsTrigger>
+                    <TabsTrigger value="workflows" className="text-xs"><Workflow className="w-3 h-3 mr-1" /> Flows</TabsTrigger>
+                    <TabsTrigger value="contacts" className="text-xs"><ContactIcon className="w-3 h-3 mr-1" /> Contacts</TabsTrigger>
                     <TabsTrigger value="webhooks" className="text-xs"><Send className="w-3 h-3 mr-1" /> Hooks</TabsTrigger>
                     <TabsTrigger value="api-keys" className="text-xs"><Shield className="w-3 h-3 mr-1" /> Keys</TabsTrigger>
                     <TabsTrigger value="email-templates" className="text-xs"><FileText className="w-3 h-3 mr-1" /> Email</TabsTrigger>
@@ -3111,6 +3157,97 @@ export default function Home() {
                     )}
                   </TabsContent>
 
+                  {/* Branding Tab */}
+                  <TabsContent value="branding" className="space-y-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <BrandLogo className="w-12 h-12" textClassName="font-bold text-xl" />
+                        <p className="text-xs text-muted-foreground">Live preview of your organization's branding.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Organization Name</label>
+                        <Input
+                          value={brandingForm.name}
+                          onChange={(e) => setBrandingForm({ ...brandingForm, name: e.target.value })}
+                          placeholder={currentOrg?.name || 'Organization name'}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Logo URL</label>
+                        <Input
+                          value={brandingForm.logoUrl}
+                          onChange={(e) => setBrandingForm({ ...brandingForm, logoUrl: e.target.value })}
+                          placeholder="https://.../logo.png"
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Brand Color</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={brandingForm.brandColor}
+                            onChange={(e) => setBrandingForm({ ...brandingForm, brandColor: e.target.value })}
+                            className="w-10 h-9 rounded border cursor-pointer"
+                          />
+                          <Input
+                            value={brandingForm.brandColor}
+                            onChange={(e) => setBrandingForm({ ...brandingForm, brandColor: e.target.value })}
+                            className="h-9 font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Custom Domain</label>
+                        <Input
+                          value={brandingForm.customDomain}
+                          onChange={(e) => setBrandingForm({ ...brandingForm, customDomain: e.target.value })}
+                          placeholder="sign.yourcompany.com"
+                          className="h-9"
+                        />
+                      </div>
+                      <Button
+                        className="w-full gradient-primary text-white"
+                        disabled={brandingSaving}
+                        onClick={async () => {
+                          try {
+                            setBrandingSaving(true);
+                            await brandingApi.update({
+                              ...(brandingForm.name.trim() ? { name: brandingForm.name.trim() } : {}),
+                              ...(brandingForm.logoUrl.trim() ? { logoUrl: brandingForm.logoUrl.trim() } : { logoUrl: '' }),
+                              brandColor: brandingForm.brandColor,
+                              ...(brandingForm.customDomain.trim() ? { customDomain: brandingForm.customDomain.trim() } : { customDomain: '' }),
+                            });
+                            toast.success('Branding updated');
+                            loadOrgs();
+                          } catch (err: any) {
+                            toast.error(err.message || 'Failed to update branding');
+                          } finally {
+                            setBrandingSaving(false);
+                          }
+                        }}
+                      >
+                        {brandingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Palette className="w-4 h-4 mr-2" /> Save Branding</>}
+                      </Button>
+                    </div>
+                  </TabsContent>
+
+                  {/* Workflows Tab */}
+                  <TabsContent value="workflows" className="space-y-4">
+                    {store.orgSettingsOrgId && (
+                      <WorkflowManager
+                        orgId={store.orgSettingsOrgId}
+                        orgRole={currentOrgRole || 'member'}
+                      />
+                    )}
+                  </TabsContent>
+
+                  {/* Contacts Tab */}
+                  <TabsContent value="contacts" className="space-y-4">
+                    <ContactGroupsManager />
+                  </TabsContent>
+
                   {/* Webhooks Tab */}
                   <TabsContent value="webhooks" className="space-y-4">
                     <WebhookManager />
@@ -3133,6 +3270,9 @@ export default function Home() {
 
                   {/* API Keys Tab */}
                   <TabsContent value="api-keys" className="space-y-4">
+                    <Button variant="outline" className="w-full" onClick={() => { setNewKeyName(''); setNewKeyScopes([]); setNewKeyPlain(null); setShowCreateKey(true); }}>
+                      <Plus className="w-4 h-4 mr-2" /> Create API Key
+                    </Button>
                     {orgApiKeys.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-4">No API keys</p>
                     ) : (
@@ -3149,6 +3289,71 @@ export default function Home() {
                       </div>
                     )}
                   </TabsContent>
+
+                  {/* Create API Key Dialog */}
+                  <Dialog open={showCreateKey} onOpenChange={(v) => { if (!v) setShowCreateKey(false); }}>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Create API Key</DialogTitle>
+                        <DialogDescription>
+                          Use this key in the <code>x-api-key</code> header to authenticate API requests.
+                        </DialogDescription>
+                      </DialogHeader>
+                      {newKeyPlain ? (
+                        <div className="space-y-3">
+                          <p className="text-sm text-muted-foreground">Copy your key now. It will not be shown again.</p>
+                          <div className="p-3 bg-muted rounded-lg break-all text-xs font-mono">{newKeyPlain}</div>
+                          <Button className="w-full gradient-primary text-white" onClick={() => { setShowCreateKey(false); if (store.orgSettingsOrgId) loadOrgSettingsData(store.orgSettingsOrgId); }}>
+                            Done
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Key Name</label>
+                            <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. CI Pipeline" className="h-9" />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Scopes</label>
+                            <div className="flex flex-wrap gap-2">
+                              {['document:read', 'document:create', 'document:update', 'document:delete', 'template:read', 'template:create'].map((scope) => {
+                                const active = newKeyScopes.includes(scope);
+                                return (
+                                  <button
+                                    key={scope}
+                                    type="button"
+                                    onClick={() => setNewKeyScopes(active ? newKeyScopes.filter((s) => s !== scope) : [...newKeyScopes, scope])}
+                                    className={`text-xs px-2 py-1 rounded-full border ${active ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'text-muted-foreground'}`}
+                                  >
+                                    {scope}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <Button
+                            className="w-full gradient-primary text-white"
+                            disabled={!newKeyName.trim() || !store.orgSettingsOrgId}
+                            onClick={async () => {
+                              try {
+                                const res = await apiKeysApi.create({
+                                  name: newKeyName.trim(),
+                                  permissions: newKeyScopes,
+                                  orgId: store.orgSettingsOrgId!,
+                                });
+                                setNewKeyPlain(res.key);
+                                toast.success('API key created');
+                              } catch (err: any) {
+                                toast.error(err.message || 'Failed to create key');
+                              }
+                            }}
+                          >
+                            <Plus className="w-4 h-4 mr-2" /> Generate Key
+                          </Button>
+                        </div>
+                      )}
+                    </DialogContent>
+                  </Dialog>
 
                   {/* Email Templates Tab */}
                   <TabsContent value="email-templates" className="space-y-4">
@@ -3383,6 +3588,17 @@ export default function Home() {
                 Expires: {formatDateOnly(expiryDate)}
               </p>
             )}
+
+            <Separator />
+
+            {/* Require OTP */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Require Email OTP</h3>
+                <p className="text-xs text-muted-foreground">Signers must verify a code sent to their email.</p>
+              </div>
+              <Switch checked={requireOtp} onCheckedChange={setRequireOtp} />
+            </div>
 
             {/* Load Template */}
             {templates.length > 0 && (
@@ -4137,8 +4353,21 @@ export default function Home() {
                     ))}
                   </div>
                 </>
-              )}
-            </CardContent>
+                      )}
+                      {viewerDoc.tags && viewerDoc.tags.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap mt-2">
+                          {viewerDoc.tags.map((t) => (
+                            <span
+                              key={t.id}
+                              className="text-[10px] px-1.5 py-0.5 rounded-full border"
+                              style={{ borderColor: t.color || '#10b981', color: t.color || '#10b981' }}
+                            >
+                              {t.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
           </Card>
 
           {/* PDF Pages */}

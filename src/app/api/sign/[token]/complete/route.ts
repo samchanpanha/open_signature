@@ -17,6 +17,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     if (!signer) return NextResponse.json({ error: 'Invalid signing link' }, { status: 404 });
     if (signer.signedAt) return NextResponse.json({ error: 'Already signed' }, { status: 400 });
 
+    // Enforce OTP verification when the document requires it
+    if (signer.document.requireOtp && !signer.otpVerifiedAt) {
+      return NextResponse.json(
+        { error: 'Email verification required before completing signing', code: 'OTP_REQUIRED' },
+        { status: 401 }
+      );
+    }
+
     // Verify all fields are filled (viewers and approvers skip this)
     if (signer.role !== 'viewer' && signer.role !== 'approver') {
       const unfilledFields = await db.documentField.findMany({
@@ -154,7 +162,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
           },
         });
         const alertEngine = getAlertEngine();
-        await alertEngine.notifyDocumentOwner(document.ownerId, document.title, document.id, 'completed');
+        await alertEngine.notifyDocumentOwner(document.ownerId, document.title, document.id, 'completed', document.organizationId ?? undefined);
       } else {
         await db.auditLog.create({
           data: {
@@ -181,7 +189,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
             document.title,
             document.id,
             nextSigner.order,
-            document.workflow.steps.length
+            document.workflow.steps.length,
+            document.organizationId ?? undefined
           );
         }
       }

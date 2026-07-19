@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const fileBuffer = await readPdfStorage(document.originalPdfPath);
 
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(fileBuffer as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Cache-Control': 'public, max-age=3600',

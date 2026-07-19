@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const fileBuffer = await readPdfStorage(pdfPath);
 
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(fileBuffer as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${document.title}${document.signedPdfPath ? '-signed' : ''}.pdf"`,

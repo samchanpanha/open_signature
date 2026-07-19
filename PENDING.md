@@ -37,3 +37,8 @@
 - DB seed: `npx prisma db seed` (or manual node script to create admin)
 - SMTP not configured - emails log to console (test mode in AlertEngine)
 - Seed credentials: admin@opesign.com / Admin123!
+- ESLint config is currently broken in this environment (eslint-config-next subpath
+  exports don't resolve under Node ESM). Validation done via `npx tsc --noEmit`
+  (passes) and `npx next build` (passes). Not a regression from this work.
+- CRON_SECRET env: set it to enable the /api/reminders/process cron endpoint
+  (disabled/401 when unset). Call via external scheduler (cron/Caddy/CI) every ~15 min.

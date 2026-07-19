@@ -15,7 +15,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { id } = await params;
     const userId = payload.userId as string;
-    const { signers: signerData, fieldAssignments, ccRecipients, expiresAt, expiresInDays, templateId, workflowId, currentStepIndex } = await req.json();
+    const { signers: signerData, fieldAssignments, ccRecipients, expiresAt, expiresInDays, templateId, workflowId, currentStepIndex, requireOtp } = await req.json();
 
     if (!signerData || signerData.length === 0) {
       return NextResponse.json({ error: 'At least one signer is required' }, { status: 400 });
@@ -86,11 +86,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ? new Date(expiresAt)
         : undefined;
 
-    // Update document with expiry, template, and workflow
+    // Update document with expiry, template, workflow, and OTP requirement
     await db.document.update({
       where: { id },
       data: {
         status: 'Sent',
+        requireOtp: Boolean(requireOtp),
         ...(computedExpiresAt ? { expiresAt: computedExpiresAt } : {}),
         ...(templateId ? { templateId } : {}),
         ...(workflowId ? { workflowId } : {}),
@@ -141,7 +142,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (workflow && workflow.steps.length > 0) {
         const firstStep = workflow.steps[0];
         const alertEngine = getAlertEngine();
-        await alertEngine.notifyWorkflowStep(firstStep, document.title, id, 1, workflow.steps.length);
+        await alertEngine.notifyWorkflowStep(firstStep, document.title, id, 1, workflow.steps.length, document.organizationId ?? undefined);
       }
     }
 
@@ -207,6 +208,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       expiresAt: updated!.expiresAt,
       signedPdfPath: updated!.signedPdfPath,
       ownerId: updated!.ownerId,
+      requireOtp: updated!.requireOtp,
       signers: updated!.signers.map((s) => ({
         id: s.id, email: s.email, name: s.name, order: s.order, role: s.role,
         signedAt: s.signedAt, rejectedAt: s.rejectedAt, rejectionReason: s.rejectionReason, token: s.token,

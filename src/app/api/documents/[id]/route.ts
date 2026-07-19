@@ -73,6 +73,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ownerId: fullDocument.ownerId,
       organizationId: fullDocument.organizationId,
       owner: fullDocument.owner,
+      requireOtp: fullDocument.requireOtp,
       workflowId: fullDocument.workflowId,
       workflow: fullDocument.workflow ? {
         id: fullDocument.workflow.id,
@@ -156,11 +157,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const body = await req.json();
-    const { folderId } = body;
+    const { folderId, requireOtp } = body;
+
+    const data: Record<string, unknown> = {};
+    if (folderId !== undefined) data.folderId = folderId || null;
+    if (requireOtp !== undefined) data.requireOtp = Boolean(requireOtp);
 
     const updated = await db.document.update({
       where: { id },
-      data: { folderId: folderId || null },
+      data,
     });
 
     return NextResponse.json({ document: updated });

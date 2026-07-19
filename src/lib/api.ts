@@ -52,6 +52,9 @@ export interface OrgListItem {
 
 export interface OrgDetail extends OrgListItem {
   ownerId: string;
+  logoUrl: string | null;
+  brandColor: string | null;
+  customDomain: string | null;
   members: {
     id: string;
     role: string;
@@ -123,6 +126,8 @@ export interface DocumentListItem {
   owner?: { id: string; name: string; email: string };
   isOwner?: boolean;
   ownerRole?: string | null;
+  signedPdfPath?: string | null;
+  tags?: { id: string; name: string; color: string | null }[];
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -232,10 +237,10 @@ export const documentsApi = {
       method: 'POST',
       body: JSON.stringify({ action, documentIds, folderId }),
     }),
-  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string, workflowId?: string, currentStepIndex?: number) =>
+  send: (id: string, signers: { email: string; name: string }[], fieldAssignments?: { fieldId: string; signerIndex: number }[], ccRecipients?: { name: string; email: string }[], expiresAt?: string, workflowId?: string, currentStepIndex?: number, requireOtp?: boolean) =>
     request<DocumentDetail>(`/api/documents/${id}/send`, {
       method: 'POST',
-      body: JSON.stringify({ signers, fieldAssignments, ccRecipients, expiresAt, workflowId, currentStepIndex }),
+      body: JSON.stringify({ signers, fieldAssignments, ccRecipients, expiresAt, workflowId, currentStepIndex, requireOtp }),
     }),
   download: (id: string) =>
     fetch(`/api/documents/${id}/download`, {
@@ -253,6 +258,16 @@ export const documentsApi = {
     request<DocumentDetail>(`/api/documents/${id}/duplicate`, { method: 'POST' }),
   signSelf: (id: string) =>
     request<{ token: string }>(`/api/documents/${id}/sign-self`, { method: 'POST' }),
+  addTag: (id: string, name: string, color?: string) =>
+    request<{ tag: { id: string; name: string; color: string | null } }>(`/api/documents/${id}/tags`, {
+      method: 'POST',
+      body: JSON.stringify({ name, color }),
+    }),
+  removeTag: (id: string, tagId: string) =>
+    request<{ success: boolean }>(`/api/documents/${id}/tags`, {
+      method: 'DELETE',
+      body: JSON.stringify({ tagId }),
+    }),
   certificate: (id: string) =>
     fetch(`/api/documents/${id}/certificate`, {
       headers: { Authorization: `Bearer ${getToken()}` },
@@ -412,6 +427,29 @@ export const contactsApi = {
   update: (id: string, data: { name?: string; email?: string; phone?: string; company?: string }) =>
     request<Contact>(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/api/contacts/${id}`, { method: 'DELETE' }),
+};
+
+// Contact Groups
+export interface ContactGroup {
+  id: string;
+  name: string;
+  contacts: { id: string; contact: { id: string; name: string; email: string } }[];
+}
+
+export const contactGroupsApi = {
+  list: () => request<{ groups: ContactGroup[] }>('/api/contact-groups').then(d => d.groups),
+  create: (data: { name: string; contactIds?: string[] }) =>
+    request<{ group: ContactGroup }>('/api/contact-groups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }).then(d => d.group),
+  update: (groupId: string, contactIds: string[]) =>
+    request<{ group: ContactGroup }>('/api/contact-groups', {
+      method: 'PUT',
+      body: JSON.stringify({ groupId, contactIds }),
+    }).then(d => d.group),
+  remove: (groupId: string) =>
+    request('/api/contact-groups', { method: 'DELETE', body: JSON.stringify({ groupId }) }),
 };
 
 // Folders

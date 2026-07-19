@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }
       
       const exportedBytes = await newDoc.save();
-      return new NextResponse(Buffer.from(exportedBytes), {
+      return new NextResponse(Buffer.from(exportedBytes) as BodyInit, {
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${document.title}-pages.pdf"`,
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     // Default: full PDF
-    return new NextResponse(pdfBytes, {
+    return new NextResponse(pdfBytes as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${document.title}${document.signedPdfPath ? '-signed' : ''}.pdf"`,

@@ -110,7 +110,8 @@ export async function POST(req: NextRequest) {
         payload.userId as string,
         newDoc.title,
         newDoc.id,
-        'sent'
+        'sent',
+        doc.organizationId ?? undefined
       );
 
       results.push({

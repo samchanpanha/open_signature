@@ -121,13 +121,18 @@
   }
 }
 
+/* Branding accent (overridden at runtime via --brand) */
+:root {
+  --brand: #10b981;
+}
+
 /* Modern gradient backgrounds */
 .gradient-primary {
-  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 70%, #000 0%) 0%, var(--brand) 50%, color-mix(in srgb, var(--brand) 70%, #fff 30%) 100%);
 }
 
 .gradient-hero {
-  background: linear-gradient(135deg, #064e3b 0%, #065f46 25%, #047857 50%, #059669 75%, #10b981 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 80%, #000 20%) 0%, color-mix(in srgb, var(--brand) 70%, #000 10%) 25%, color-mix(in srgb, var(--brand) 60%, #000 5%) 50%, color-mix(in srgb, var(--brand) 70%, #000 10%) 75%, var(--brand) 100%);
 }
 
 .gradient-mesh {

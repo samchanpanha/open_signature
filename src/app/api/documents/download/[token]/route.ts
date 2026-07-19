@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     const fileBuffer = await readPdfStorage(storageKey);
     await db.downloadLink.delete({ where: { id: link.id } });
 
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(fileBuffer as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${fileName}"`,

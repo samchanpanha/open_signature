@@ -62,6 +62,8 @@ model User {
   jobTitle  String?
   phone     String?
   avatarUrl String?
+  telegramChatId String?   @unique // linked Telegram chat id
+  telegramLinkedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -90,6 +92,7 @@ model User {
   usageStats       UsageStat[]
   preferences      UserPreferences?
   comments         DocumentComment[]
+  telegramBindings TelegramBinding[]
 }
 
 model UserPreferences {
@@ -122,7 +125,8 @@ model Document {
   revokedBy       String?
   revokeReason    String?
   allowOfflineSign Boolean  @default(true)
-  createdAt       DateTime  @default(now())
+  requireOtp      Boolean  @default(false)
+  createdAt       DateTime @default(now())
   updatedAt       DateTime  @updatedAt
   organizationId  String?
   folderId        String?
@@ -465,6 +469,19 @@ model Notification {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   document Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model TelegramBinding {
+  id          String   @id @default(cuid())
+  token       String   @unique // one-time linking token shown to the user
+  chatId      String                 // Telegram chat id captured at /start
+  username    String?
+  firstName   String?
+  linkedUserId String?              // set once the token is redeemed
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [linkedUserId], references: [id], onDelete: SetNull)
 }
 
 model Reminder {

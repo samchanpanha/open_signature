@@ -31,6 +31,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       name: org.name,
       slug: org.slug,
       ownerId: org.ownerId,
+      logoUrl: org.logoUrl,
+      brandColor: org.brandColor,
+      customDomain: org.customDomain,
       createdAt: org.createdAt,
       members: members.map(m => ({
         id: m.id,

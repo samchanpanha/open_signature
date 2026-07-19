@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       });
 
       // Notify document owner
-      await alertEngine.notifyDocumentOwner(doc.ownerId, doc.title, doc.id, 'expired');
+      await alertEngine.notifyDocumentOwner(doc.ownerId, doc.title, doc.id, 'expired', doc.organizationId ?? undefined);
 
       // Dispatch webhook
       if (doc.organizationId) {

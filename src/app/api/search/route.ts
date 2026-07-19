@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       const docs = await db.document.findMany({
         where: {
           AND: [
-            { userId },
+            { ownerId: userId },
             {
               OR: [
                 { title: { contains: searchTerm } },
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
           ],
         },
         include: {
-          signers: { select: { id: true, email: true, name: true, status: true } },
+          signers: { select: { id: true, email: true, name: true } },
         },
         take: 10,
       });

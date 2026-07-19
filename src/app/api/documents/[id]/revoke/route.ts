@@ -73,7 +73,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           userId,
           doc.title,
           doc.id,
-          'revoked'
+          'revoked',
+          doc.organizationId ?? undefined
         );
       }
     }

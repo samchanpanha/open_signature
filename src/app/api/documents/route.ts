@@ -113,6 +113,7 @@ export async function GET(req: NextRequest) {
             },
           },
         },
+        tags: { orderBy: { name: 'asc' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -142,6 +143,7 @@ export async function GET(req: NextRequest) {
         owner: d.owner,
         isOwner: d.ownerId === userId,
         ownerRole: ownerRoleMap.get(`${d.id}:${d.ownerId}`) || null,
+        tags: d.tags.map((t) => ({ id: t.id, name: t.name, color: t.color })),
       }))
     );
   } catch (error) {

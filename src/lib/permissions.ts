@@ -7,6 +7,8 @@ export interface AuthUser {
   userId: string;
   email: string;
   name: string;
+  apiKeyId?: string;
+  scopes?: string[];
 }
 
 export interface PermissionCheck {
@@ -76,21 +78,68 @@ export const ALL_ROLES = ['owner', 'admin', 'editor', 'signer', 'viewer', 'membe
 export const MANAGEABLE_ROLES = ['admin', 'editor', 'signer', 'viewer', 'member'];
 
 /**
- * Extract authenticated user from request
+ * Extract authenticated user from request (JWT Bearer only, synchronous).
+ * For API-key auth, use getAuthUserAsync.
  */
 export function getAuthUser(req: NextRequest): AuthUser | null {
   const authHeader = req.headers.get('authorization');
   if (!authHeader?.startsWith('Bearer ')) return null;
-  
+
   const payload = verifyToken(authHeader.slice(7));
   if (!payload || !payload.userId) return null;
-  
+
   return {
     id: payload.userId as string,
     userId: payload.userId as string,
     email: payload.email as string,
     name: payload.name as string,
   };
+}
+
+/**
+ * Extract authenticated user supporting both JWT Bearer and x-api-key headers.
+ * Async because API-key lookup hits the database.
+ */
+export async function getAuthUserAsync(req: NextRequest): Promise<AuthUser | null> {
+  const jwtUser = getAuthUser(req);
+  if (jwtUser) return jwtUser;
+
+  const apiKey = req.headers.get('x-api-key');
+  if (apiKey) {
+    const keyRecord = await db.apiKey.findFirst({
+      where: {
+        key: apiKey,
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      include: { user: true },
+    });
+    if (keyRecord?.user) {
+      await db.apiKey.update({
+        where: { id: keyRecord.id },
+        data: { lastUsedAt: new Date() },
+      }).catch(() => {});
+      return {
+        id: keyRecord.userId,
+        userId: keyRecord.userId,
+        email: keyRecord.user.email,
+        name: keyRecord.user.name,
+        apiKeyId: keyRecord.id,
+        scopes: safeParseScopes(keyRecord.permissions),
+      };
+    }
+  }
+
+  return null;
+}
+
+function safeParseScopes(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
