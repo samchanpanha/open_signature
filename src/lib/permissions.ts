@@ -225,7 +225,7 @@ export function requirePermission(
   action: 'create' | 'read' | 'update' | 'delete' | 'sign'
 ) {
   return async (req: NextRequest): Promise<NextResponse | null> => {
-    const user = getAuthUser(req);
+    const user = await getAuthUserAsync(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -255,7 +255,7 @@ export function requirePermission(
  */
 export function requireRole(...roles: string[]) {
   return async (req: NextRequest): Promise<NextResponse | null> => {
-    const user = getAuthUser(req);
+    const user = await getAuthUserAsync(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -286,7 +286,7 @@ export function withAuth<T extends NextRequest>(
   handler: (req: T, user: AuthUser) => Promise<NextResponse>
 ) {
   return async (req: T): Promise<NextResponse> => {
-    const user = getAuthUser(req);
+    const user = await getAuthUserAsync(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -303,7 +303,7 @@ export function withPermission(
   handler: (req: NextRequest, user: AuthUser) => Promise<NextResponse>
 ) {
   return async (req: NextRequest): Promise<NextResponse> => {
-    const user = getAuthUser(req);
+    const user = await getAuthUserAsync(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

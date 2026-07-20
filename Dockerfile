@@ -18,6 +18,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=prisma /app/node_modules/@prisma ./node_modules/@prisma
 COPY . .
+# Push schema to create the SQLite DB at build time
+RUN DATABASE_URL="file:/app/data/custom.db" npx prisma db push --skip-generate
 RUN npm run build
 
 # Stage 4: Production image
@@ -42,8 +44,9 @@ COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=prisma /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=deps /app/node_modules/.package-lock.json ./node_modules/.package-lock.json
 
-# Create database and uploads directories
-RUN mkdir -p ./db ./uploads && chown -R nextjs:nodejs ./db ./uploads
+# Copy the built database and create data/uploads dirs
+COPY --from=builder --chown=nextjs:nodejs /app/data ./data
+RUN chown -R nextjs:nodejs ./data ./public
 
 USER nextjs
 
@@ -51,6 +54,8 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+# Override DATABASE_URL to use absolute path in container
+ENV DATABASE_URL=file:/app/data/custom.db
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://localhost:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
