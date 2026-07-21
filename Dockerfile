@@ -39,13 +39,21 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 # Copy static files
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma client and engine
+# Copy Prisma client, engine, CLI, and schema for runtime migrations
 COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=prisma /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=deps /app/node_modules/.package-lock.json ./node_modules/.package-lock.json
+COPY --from=deps /app/node_modules/prisma ./node_modules/prisma
+
+# Copy prisma schema for runtime db push
+COPY --from=builder /app/prisma ./prisma
 
 # Copy the built database and create data/uploads dirs
 COPY --from=builder --chown=nextjs:nodejs /app/data ./data
+
+# Copy entrypoint
+COPY --chmod=755 docker-entrypoint.sh ./
+
 RUN chown -R nextjs:nodejs ./data ./public
 
 USER nextjs
@@ -60,4 +68,4 @@ ENV DATABASE_URL=file:/app/data/custom.db
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://localhost:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
 
-CMD ["node", "server.js"]
+CMD ["./docker-entrypoint.sh"]

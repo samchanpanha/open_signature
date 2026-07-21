@@ -1437,35 +1437,27 @@ export default function Home() {
     }
   };
 
-  const handleSigningFieldUpdate = async (fieldId: string, value: string, immediate = false) => {
+  const handleSigningFieldUpdate = async (fieldId: string, value: string, _immediate = false) => {
     if (!store.signingToken) return;
     setSigningFieldValues(prev => ({ ...prev, [fieldId]: value }));
 
-    if (immediate || fieldId !== activeSigningField) {
-      if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
-      try {
-        await signingApi.updateField(store.signingToken, fieldId, value);
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to save field');
-      }
-    } else {
-      if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
-      textUpdateTimerRef.current = setTimeout(async () => {
-        try {
-          await signingApi.updateField(store.signingToken!, fieldId, value);
-        } catch (err: any) {
-          toast.error(err.message || 'Failed to save field');
-        }
-      }, 300);
+    if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
+    try {
+      await signingApi.updateField(store.signingToken, fieldId, value);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save field');
     }
   };
 
   const handleCompleteSigning = async () => {
     if (!store.signingToken || !signingInfo) return;
-    const unfilled = signingInfo.signer.fields.filter(f => !signingFieldValues[f.id]?.trim());
-    if (unfilled.length > 0) {
-      toast.error(`Please fill all ${unfilled.length} remaining field(s)`);
-      return;
+    const signerRole = signingInfo.signer.role;
+    if (signerRole !== 'viewer' && signerRole !== 'approver') {
+      const unfilled = signingInfo.signer.fields.filter(f => !signingFieldValues[f.id]?.trim());
+      if (unfilled.length > 0) {
+        toast.error(`Please fill all ${unfilled.length} remaining field(s)`);
+        return;
+      }
     }
     setSigningLoading(true);
     try {
@@ -1948,8 +1940,9 @@ export default function Home() {
                   className="w-full mt-3 bg-emerald-600 hover:bg-emerald-700"
                   onClick={async () => {
                     if (textUpdateTimerRef.current) clearTimeout(textUpdateTimerRef.current);
-                    if (store.signingToken && signingFieldValues[field.id]) {
-                      await signingApi.updateField(store.signingToken, field.id, signingFieldValues[field.id]);
+                    if (store.signingToken) {
+                      const val = signingFieldValues[field.id] || '';
+                      await signingApi.updateField(store.signingToken, field.id, val);
                     }
                     setActiveSigningField(null);
                   }}
@@ -3835,55 +3828,77 @@ export default function Home() {
               )}
 
               <div className="space-y-2">
-                {viewerDoc.signers.map((signer, i) => (
-                  <div key={signer.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-                        style={{ backgroundColor: `${SIGNER_COLORS[i % SIGNER_COLORS.length]}20`, color: SIGNER_COLORS[i % SIGNER_COLORS.length] }}
-                      >
-                        {signer.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">{signer.name}</p>
-                        <p className="text-xs text-muted-foreground">{signer.email}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {signer.rejectedAt && (
-                        <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                          <XCircle className="w-3 h-3 mr-1" /> Rejected
-                        </Badge>
-                      )}
-                      {signer.rejectionReason && (
-                        <span className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate" title={signer.rejectionReason}>
-                          {signer.rejectionReason}
-                        </span>
-                      )}
-                      {!signer.rejectedAt && !signer.signedAt && signer.token && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Copy signing link"
-                          onClick={() => {
-                            const link = `${window.location.origin}/?sign=${signer.token}`;
-                            navigator.clipboard.writeText(link);
-                            toast.success('Signing link copied!');
-                          }}
+                {viewerDoc.signers.map((signer, i) => {
+                  const signerFields = viewerDoc.fields.filter(f => f.signerId === signer.id);
+                  const filledFields = signerFields.filter(f => f.value);
+                  const totalFields = signerFields.length;
+                  return (
+                    <div key={signer.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                          style={{ backgroundColor: `${SIGNER_COLORS[i % SIGNER_COLORS.length]}20`, color: SIGNER_COLORS[i % SIGNER_COLORS.length] }}
                         >
-                          <Copy className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      {!signer.rejectedAt && signer.signedAt ? (
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
-                          <Check className="w-3 h-3 mr-1" /> Signed
-                        </Badge>
-                      ) : !signer.rejectedAt ? (
-                        <Badge variant="secondary">Pending</Badge>
-                      ) : null}
+                          {signer.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium">{signer.name}</p>
+                            {signer.role && signer.role !== 'signer' && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                {signer.role}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{signer.email}</p>
+                          {signer.signedAt && (
+                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                              Signed {new Date(signer.signedAt).toLocaleDateString()} {new Date(signer.signedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {totalFields > 0 && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {filledFields.length}/{totalFields} fields
+                          </span>
+                        )}
+                        {signer.rejectedAt && (
+                          <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                            <XCircle className="w-3 h-3 mr-1" /> Rejected
+                          </Badge>
+                        )}
+                        {signer.rejectionReason && (
+                          <span className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate" title={signer.rejectionReason}>
+                            {signer.rejectionReason}
+                          </span>
+                        )}
+                        {!signer.rejectedAt && !signer.signedAt && signer.token && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Copy signing link"
+                            onClick={() => {
+                              const link = `${window.location.origin}/?sign=${signer.token}`;
+                              navigator.clipboard.writeText(link);
+                              toast.success('Signing link copied!');
+                            }}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {!signer.rejectedAt && signer.signedAt ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">
+                            <Check className="w-3 h-3 mr-1" /> Signed
+                          </Badge>
+                        ) : !signer.rejectedAt ? (
+                          <Badge variant="secondary">Pending</Badge>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* CC Recipients */}

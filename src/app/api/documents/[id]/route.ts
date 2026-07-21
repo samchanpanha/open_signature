@@ -91,7 +91,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         email: s.email,
         name: s.name,
         order: s.order,
+        role: s.role,
         signedAt: s.signedAt,
+        rejectedAt: s.rejectedAt,
+        rejectionReason: s.rejectionReason,
         token: s.token,
       })),
       fields: fullDocument.fields.map((f) => ({

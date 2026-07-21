@@ -151,6 +151,7 @@ export interface DocumentDetail extends DocumentListItem {
     email: string;
     name: string;
     order: number;
+    role?: string;
     signedAt: string | null;
     token?: string;
     rejectedAt?: string | null;
@@ -177,6 +178,7 @@ export interface SignerInfo {
   email: string;
   name: string;
   order: number;
+  role: string;
   signedAt: string | null;
   fields: {
     id: string;
@@ -680,21 +682,62 @@ export interface DocumentPermission {
 export interface OrgMemberForDoc {
   userId: string;
   role: string;
+  roles?: string[];
   name: string;
   email: string;
 }
 
 export interface DocAccessEntry {
-  userId: string;
+  userId?: string;
   name: string;
   email: string;
   role: string;
+  roles?: string[];
+  permissions: string[];
   accessType: 'owner' | 'role' | 'shared';
+  docPermissionId?: string;
+  expiresAt?: string;
+}
+
+export interface DocPermissionEntry {
+  id: string;
+  userId?: string;
+  email?: string;
+  role: string;
+  permissions: string[];
+  expiresAt?: string;
+  createdAt?: string;
 }
 
 export const documentPermissionsApi = {
   get: (docId: string) =>
-    request<{ permissions: DocumentPermission[]; orgMembers: OrgMemberForDoc[]; allAccess: DocAccessEntry[] }>(`/api/documents/${docId}/permissions`),
+    request<{
+      docPermissions: DocPermissionEntry[];
+      legacyPermissions: DocumentPermission[];
+      allAccess: DocAccessEntry[];
+      roles: string[];
+      permissionActions: string[];
+    }>(`/api/documents/${docId}/permissions`),
+  grant: (docId: string, data: {
+    targetUserId?: string;
+    email?: string;
+    role: string;
+    permissions?: string[];
+    expiresAt?: string;
+  }) =>
+    request<{ id: string; success: boolean; role: string; permissions: string[] }>(`/api/documents/${docId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  revoke: (docId: string, data: { permId?: string; userId?: string }) => {
+    const params = new URLSearchParams();
+    if (data.permId) params.set('permId', data.permId);
+    if (data.userId) params.set('userId', data.userId);
+    return request<{ success: boolean }>(`/api/documents/${docId}/permissions?${params.toString()}`, {
+      method: 'DELETE',
+    });
+  },
+  // Legacy API (backward compat)
   add: (docId: string, targetUserId: string, action: string) =>
     request<{ id: string; success: boolean }>(`/api/documents/${docId}/permissions`, {
       method: 'POST',

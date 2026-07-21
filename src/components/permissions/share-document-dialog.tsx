@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Share2, Trash2, UserPlus, Shield, Eye, Edit, CheckCircle, MessageCircle, Copy, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { documentPermissionsApi, telegramApi, type DocumentPermission, type OrgMemberForDoc, type DocAccessEntry } from '@/lib/api';
+import { documentPermissionsApi, telegramApi, type DocumentPermission, type OrgMemberForDoc, type DocAccessEntry, type DocPermissionEntry } from '@/lib/api';
 
 interface ShareDocumentDialogProps {
   open: boolean;
@@ -34,7 +34,7 @@ const ROLE_ACCESS: Record<string, string> = {
 };
 
 export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTitle }: ShareDocumentDialogProps) {
-  const [permissions, setPermissions] = useState<DocumentPermission[]>([]);
+  const [permissions, setPermissions] = useState<DocPermissionEntry[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMemberForDoc[]>([]);
   const [allAccess, setAllAccess] = useState<DocAccessEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,8 +56,8 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
     setLoading(true);
     try {
       const data = await documentPermissionsApi.get(documentId);
-      setPermissions(data.permissions);
-      setOrgMembers(data.orgMembers);
+      setPermissions(data.docPermissions || data.legacyPermissions || []);
+      setOrgMembers(data.allAccess?.filter((a: any) => a.userId) as any || []);
       setAllAccess(data.allAccess || []);
       loadTelegramLink();
     } catch (err: any) {
@@ -79,7 +79,11 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
     if (!selectedMember) { toast.error('Select a member'); return; }
     setAdding(true);
     try {
-      await documentPermissionsApi.add(documentId, selectedMember, selectedAction);
+      await documentPermissionsApi.grant(documentId, {
+        targetUserId: selectedMember,
+        role: selectedAction === 'manage' ? 'admin' : selectedAction === 'edit' ? 'editor' : selectedAction === 'sign' ? 'signer' : 'viewer',
+        permissions: [selectedAction === 'manage' ? 'edit' : selectedAction],
+      });
       toast.success('Permission added');
       setSelectedMember('');
       loadPermissions();
@@ -90,9 +94,9 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
     }
   };
 
-  const handleRemove = async (userId: string, action: string) => {
+  const handleRemove = async (userId: string, _action: string) => {
     try {
-      await documentPermissionsApi.remove(documentId, userId, action);
+      await documentPermissionsApi.revoke(documentId, { userId });
       toast.success('Permission removed');
       loadPermissions();
     } catch (error: any) {
@@ -101,7 +105,7 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
   };
 
   const availableMembers = orgMembers.filter(
-    m => !permissions.some(p => p.userId === m.userId && p.action === selectedAction)
+    m => !permissions.some(p => p.userId === m.userId)
   );
 
   return (
@@ -191,12 +195,15 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
                 {permissions.map(p => (
                   <div key={p.id} className="flex items-center justify-between p-2 rounded border">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm">{p.userName}</span>
+                      <span className="text-sm">{p.email || p.userId || 'Unknown'}</span>
                       <Badge variant="outline" className="text-[10px]">
-                        {ACTION_OPTIONS.find(a => a.value === p.action)?.label || p.action}
+                        {p.role}
                       </Badge>
+                      {p.permissions?.map((perm: string) => (
+                        <Badge key={perm} variant="secondary" className="text-[10px]">{perm}</Badge>
+                      ))}
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => handleRemove(p.userId, p.action)} className="h-8 w-8 p-0 text-destructive" aria-label="Remove permission">
+                    <Button variant="ghost" size="sm" onClick={() => handleRemove(p.userId || '', p.role)} className="h-8 w-8 p-0 text-destructive" aria-label="Remove permission">
                       <Trash2 className="w-3 h-3" />
                     </Button>
                   </div>

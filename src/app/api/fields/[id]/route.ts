@@ -19,10 +19,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     });
     if (!doc) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    let signerIdUpdate = {};
+    if (body.signerId !== undefined) {
+      if (body.signerId) {
+        const signerExists = await db.signer.findFirst({
+          where: { id: body.signerId, documentId: field.documentId },
+        });
+        if (!signerExists) {
+          return NextResponse.json({ error: 'Signer not found for this document' }, { status: 400 });
+        }
+        signerIdUpdate = { signerId: body.signerId };
+      } else {
+        signerIdUpdate = { signerId: null };
+      }
+    }
+
     const updated = await db.documentField.update({
       where: { id },
       data: {
-        ...(body.signerId !== undefined ? { signerId: body.signerId || null } : {}),
+        ...signerIdUpdate,
         ...(body.value !== undefined ? { value: body.value } : {}),
         ...(body.x !== undefined ? { x: body.x } : {}),
         ...(body.y !== undefined ? { y: body.y } : {}),

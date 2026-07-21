@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, hasPermission } from '@/lib/permissions'
-
+import { getAuthUser, hasPermission, getUserRoles, hasDocumentPermission } from '@/lib/permissions';
 
 // GET /api/documents/[id]/permissions - Get document permissions
 export async function GET(
@@ -21,8 +20,20 @@ export async function GET(
     });
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
-    // Get explicit permissions for this document (excluding expired)
-    const permissions = await db.permission.findMany({
+    // Get document-level permissions (from new DocumentPermission model)
+    const docPermissions = await db.documentPermission.findMany({
+      where: {
+        documentId: docId,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: new Date() } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Get legacy permissions
+    const legacyPermissions = await db.permission.findMany({
       where: {
         documentId: docId,
         OR: [
@@ -35,83 +46,112 @@ export async function GET(
       },
     });
 
-    // Get all org members if in an org
-    let orgMembers: { userId: string; role: string; user: { id: string; name: string; email: string } }[] = [];
-    let orgMemberAccess: { userId: string; name: string; email: string; role: string; accessType: string }[] = [];
-    
+    // Get org members if in an org
+    let orgMembers: any[] = [];
     if (doc.organizationId) {
       orgMembers = await db.organizationMember.findMany({
         where: { orgId: doc.organizationId, isActive: true },
         include: { user: { select: { id: true, name: true, email: true } } },
       });
-
-      // Determine access for each org member
-      orgMemberAccess = orgMembers.map(m => {
-        // Owners and admins have full access
-        if (m.role === 'owner' || m.role === 'admin') {
-          return {
-            userId: m.userId,
-            name: m.user.name,
-            email: m.user.email,
-            role: m.role,
-            accessType: 'role',
-          };
-        }
-
-        // Check if they have explicit permissions
-        const explicitPerm = permissions.find(p => p.userId === m.userId);
-        if (explicitPerm) {
-          return {
-            userId: m.userId,
-            name: m.user.name,
-            email: m.user.email,
-            role: m.role,
-            accessType: 'shared',
-          };
-        }
-
-        // Check role-based access (editor can create/edit, signer/viewer can view)
-        return {
-          userId: m.userId,
-          name: m.user.name,
-          email: m.user.email,
-          role: m.role,
-          accessType: 'role',
-        };
-      });
     }
 
-    // Add owner if not in org members
+    // Build access list
+    const allAccess: any[] = [];
+
+    // Add owner
     const owner = await db.user.findUnique({
       where: { id: doc.ownerId },
       select: { id: true, name: true, email: true },
     });
-    if (owner && !orgMemberAccess.some(m => m.userId === owner.id)) {
-      orgMemberAccess.unshift({
+    if (owner) {
+      allAccess.push({
         userId: owner.id,
         name: owner.name,
         email: owner.email,
         role: 'owner',
+        permissions: ['read', 'comment', 'sign', 'edit', 'delete', 'share'],
         accessType: 'owner',
       });
     }
 
+    // Add org members with their roles
+    for (const m of orgMembers) {
+      if (m.userId === doc.ownerId) continue;
+      const roles = (() => {
+        try { const p = JSON.parse(m.roles); return Array.isArray(p) && p.length > 0 ? p : [m.role]; }
+        catch { return [m.role]; }
+      })();
+
+      const isPrivileged = roles.includes('owner') || roles.includes('admin');
+      const existingDocPerm = docPermissions.find((p) => p.userId === m.userId);
+
+      allAccess.push({
+        userId: m.userId,
+        name: m.user.name,
+        email: m.user.email,
+        role: m.role,
+        roles,
+        permissions: existingDocPerm
+          ? JSON.parse(existingDocPerm.permissions || '["read"]')
+          : isPrivileged
+            ? ['read', 'comment', 'sign', 'edit', 'delete', 'share']
+            : roles.includes('editor')
+              ? ['read', 'comment', 'sign', 'edit']
+              : roles.includes('signer')
+                ? ['read', 'comment', 'sign']
+                : ['read'],
+        accessType: existingDocPerm ? 'shared' : 'role',
+        docPermissionId: existingDocPerm?.id,
+      });
+    }
+
+    // Add external document permissions (users not in org)
+    for (const dp of docPermissions) {
+      if (dp.userId && !allAccess.some((a) => a.userId === dp.userId)) {
+        allAccess.push({
+          userId: dp.userId,
+          email: dp.email,
+          name: dp.email,
+          role: dp.role,
+          permissions: JSON.parse(dp.permissions || '["read"]'),
+          accessType: 'shared',
+          docPermissionId: dp.id,
+          expiresAt: dp.expiresAt,
+        });
+      }
+      if (!dp.userId && dp.email) {
+        allAccess.push({
+          email: dp.email,
+          name: dp.email,
+          role: dp.role,
+          permissions: JSON.parse(dp.permissions || '["read"]'),
+          accessType: 'shared',
+          docPermissionId: dp.id,
+          expiresAt: dp.expiresAt,
+        });
+      }
+    }
+
     return NextResponse.json({
-      permissions: permissions.map(p => ({
+      docPermissions: docPermissions.map((p) => ({
+        id: p.id,
+        userId: p.userId,
+        email: p.email,
+        role: p.role,
+        permissions: JSON.parse(p.permissions || '["read"]'),
+        expiresAt: p.expiresAt,
+        createdAt: p.createdAt,
+      })),
+      legacyPermissions: legacyPermissions.map((p) => ({
         id: p.id,
         userId: p.userId,
         userName: p.user.name,
         userEmail: p.user.email,
         action: p.action,
-        resource: p.resource,
       })),
-      orgMembers: orgMembers.map(m => ({
-        userId: m.userId,
-        role: m.role,
-        name: m.user.name,
-        email: m.user.email,
-      })),
-      allAccess: orgMemberAccess,
+      allAccess,
+      roles: ['viewer', 'commenter', 'signer', 'editor', 'admin'],
+      permissionActions: ['read', 'comment', 'sign', 'edit', 'delete', 'share'],
     });
   } catch (error) {
     console.error('Get document permissions error:', error);
@@ -119,7 +159,7 @@ export async function GET(
   }
 }
 
-// POST /api/documents/[id]/permissions - Add document permission
+// POST /api/documents/[id]/permissions - Grant document permission
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -131,10 +171,13 @@ export async function POST(
     const { id: docId } = await params;
     const userId = payload.userId as string;
     const body = await req.json();
-    const { targetUserId, action, expiresAt } = body;
+    const { targetUserId, email, role, permissions, expiresAt } = body;
 
-    if (!targetUserId || !action) {
-      return NextResponse.json({ error: 'targetUserId and action required' }, { status: 400 });
+    if (!role) {
+      return NextResponse.json({ error: 'role is required' }, { status: 400 });
+    }
+    if (!targetUserId && !email) {
+      return NextResponse.json({ error: 'targetUserId or email is required' }, { status: 400 });
     }
 
     const doc = await db.document.findUnique({
@@ -143,52 +186,84 @@ export async function POST(
     });
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
-    // Check if user has manage permission or is owner
-    if (doc.ownerId !== userId && doc.organizationId) {
-      const canManage = await hasPermission(userId, doc.organizationId, 'document', 'manage');
-      if (!canManage) {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    // Check if user can manage
+    if (doc.ownerId !== userId) {
+      if (doc.organizationId) {
+        const canManage = await hasPermission(userId, doc.organizationId, 'document', 'update');
+        if (!canManage) {
+          return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+        }
+      } else {
+        return NextResponse.json({ error: 'Only document owner can manage permissions' }, { status: 403 });
       }
     }
 
-    // Create or update permission
-    const existing = await db.permission.findFirst({
-      where: { userId: targetUserId, documentId: docId, action },
-    });
+    // Resolve permissions from role if not explicitly provided
+    const ROLE_DEFAULTS: Record<string, string[]> = {
+      admin: ['read', 'comment', 'sign', 'edit', 'delete', 'share'],
+      editor: ['read', 'comment', 'sign', 'edit'],
+      signer: ['read', 'comment', 'sign'],
+      commenter: ['read', 'comment'],
+      viewer: ['read'],
+    };
+    const finalPermissions = permissions || ROLE_DEFAULTS[role] || ['read'];
 
-    if (existing) {
-      return NextResponse.json({ message: 'Permission already exists' });
+    // Create or update
+    const data: any = {
+      documentId: docId,
+      userId: targetUserId || null,
+      email: email || null,
+      role,
+      permissions: JSON.stringify(finalPermissions),
+      grantedBy: userId,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    };
+
+    let docPerm;
+    if (targetUserId) {
+      const existing = await db.documentPermission.findFirst({
+        where: { documentId: docId, userId: targetUserId },
+      });
+      if (existing) {
+        docPerm = await db.documentPermission.update({
+          where: { id: existing.id },
+          data: { role, permissions: JSON.stringify(finalPermissions), expiresAt: expiresAt ? new Date(expiresAt) : null },
+        });
+      } else {
+        docPerm = await db.documentPermission.create({ data });
+      }
+    } else if (email) {
+      const existing = await db.documentPermission.findFirst({
+        where: { documentId: docId, email },
+      });
+      if (existing) {
+        docPerm = await db.documentPermission.update({
+          where: { id: existing.id },
+          data: { role, permissions: JSON.stringify(finalPermissions), expiresAt: expiresAt ? new Date(expiresAt) : null },
+        });
+      } else {
+        docPerm = await db.documentPermission.create({ data });
+      }
     }
-
-    const permission = await db.permission.create({
-      data: {
-        userId: targetUserId,
-        documentId: docId,
-        action,
-        resource: 'document',
-        grantedBy: userId,
-        expiresAt: expiresAt ? new Date(expiresAt) : null,
-      },
-    });
 
     // Audit log
     await db.auditLog.create({
       data: {
         userId,
-        action: 'permission_granted',
-        details: `Granted ${action} permission on document to user ${targetUserId}`,
+        action: 'DOCUMENT_PERMISSION_GRANTED',
+        details: `Granted ${role} role with [${finalPermissions.join(', ')}] on document to ${targetUserId || email}`,
         documentId: docId,
       },
     });
 
-    return NextResponse.json({ id: permission.id, success: true });
+    return NextResponse.json({ id: docPerm?.id, success: true, role, permissions: finalPermissions });
   } catch (error) {
     console.error('Add document permission error:', error);
     return NextResponse.json({ error: 'Failed to add permission' }, { status: 500 });
   }
 }
 
-// DELETE /api/documents/[id]/permissions - Remove document permission
+// DELETE /api/documents/[id]/permissions - Revoke document permission
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -200,11 +275,11 @@ export async function DELETE(
     const { id: docId } = await params;
     const userId = payload.userId as string;
     const { searchParams } = new URL(req.url);
+    const permId = searchParams.get('permId');
     const targetUserId = searchParams.get('userId');
-    const action = searchParams.get('action');
 
-    if (!targetUserId || !action) {
-      return NextResponse.json({ error: 'userId and action required' }, { status: 400 });
+    if (!permId && !targetUserId) {
+      return NextResponse.json({ error: 'permId or userId required' }, { status: 400 });
     }
 
     const doc = await db.document.findUnique({
@@ -213,24 +288,31 @@ export async function DELETE(
     });
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
 
-    // Check permissions
-    if (doc.ownerId !== userId && doc.organizationId) {
-      const canManage = await hasPermission(userId, doc.organizationId, 'document', 'manage');
-      if (!canManage) {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    if (doc.ownerId !== userId) {
+      if (doc.organizationId) {
+        const canManage = await hasPermission(userId, doc.organizationId, 'document', 'update');
+        if (!canManage) {
+          return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+        }
+      } else {
+        return NextResponse.json({ error: 'Only document owner can manage permissions' }, { status: 403 });
       }
     }
 
-    await db.permission.deleteMany({
-      where: { userId: targetUserId, documentId: docId, action },
-    });
+    if (permId) {
+      await db.documentPermission.delete({ where: { id: permId } });
+    } else if (targetUserId) {
+      await db.documentPermission.deleteMany({
+        where: { documentId: docId, userId: targetUserId },
+      });
+    }
 
     // Audit log
     await db.auditLog.create({
       data: {
         userId,
-        action: 'permission_revoked',
-        details: `Revoked ${action} permission on document from user ${targetUserId}`,
+        action: 'DOCUMENT_PERMISSION_REVOKED',
+        details: `Revoked permission on document from ${targetUserId || permId}`,
         documentId: docId,
       },
     });

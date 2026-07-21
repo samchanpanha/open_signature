@@ -37,6 +37,7 @@ model Organization {
 model OrganizationMember {
   id            String    @id @default(cuid())
   role          String    @default("member") // owner, admin, editor, signer, viewer, member
+  roles         String    @default("[]") // JSON array: ["admin","editor"] - supports multi-role
   inviteStatus  String    @default("active") // pending, active, rejected
   invitedBy     String?
   isActive      Boolean   @default(true)
@@ -77,6 +78,7 @@ model User {
   invitedMembers   OrganizationMember[] @relation("InvitedBy")
   permissions      Permission[]
   grantedPermissions Permission[] @relation("GrantedPermissions")
+  grantedDocPermissions DocumentPermission[] @relation("GrantedDocPermissions")
   assignments      Assignment[]
   assignedDocs     Assignment[]       @relation("AssignedBy")
   notifications    Notification[]
@@ -159,6 +161,7 @@ model Document {
   docReminders  DocumentReminder[]
   downloadLinks DownloadLink[]
   permissions   Permission[]
+  docPermissions DocumentPermission[]
   versions      DocumentVersion[]
   tags          DocumentTag[]
   comments      DocumentComment[]
@@ -354,6 +357,27 @@ model Permission {
   @@unique([userId, orgId, resource, action])
   @@unique([userId, documentId, action])
   @@unique([userId, templateId, action])
+}
+
+model DocumentPermission {
+  id         String    @id @default(cuid())
+  documentId String
+  userId     String?
+  email      String?   // for external users without accounts
+  role       String    @default("viewer") // viewer, commenter, signer, editor, admin
+  permissions String   @default("[\"read\"]") // JSON array: ["read","comment","sign","edit","delete","share"]
+  grantedBy  String?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  grantor  User?    @relation("GrantedDocPermissions", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([documentId, userId])
+  @@unique([documentId, email])
+  @@index([documentId])
+  @@index([userId])
 }
 
 model PermissionTemplate {
