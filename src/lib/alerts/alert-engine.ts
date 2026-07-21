@@ -4,7 +4,7 @@
 
 import { prisma } from '@/lib/db';
 import nodemailer from 'nodemailer';
-import { sendTelegramMessage, TelegramError, type InlineKeyboardButton } from '@/lib/telegram';
+import { sendTelegramMessage, sendDocumentActionMenu, TelegramError, type InlineKeyboardButton } from '@/lib/telegram';
 
 export interface AlertConfig {
   reminderDaysBefore: number;
@@ -107,13 +107,14 @@ export class AlertEngine {
   }
 
   /**
-   * Send a Telegram notification to a user if their chat is linked.
-   * No-op (caught) when the user has no linked Telegram account.
+   * Send a Telegram notification to a user if their chat is linked and preferences allow.
+   * No-op (caught) when the user has no linked Telegram account or has disabled the notification type.
    */
   async notifyTelegram(
     userId: string,
     text: string,
-    buttons?: InlineKeyboardButton[]
+    buttons?: InlineKeyboardButton[],
+    notificationType?: string
   ): Promise<void> {
     try {
       const user = await prisma.user.findUnique({
@@ -121,14 +122,62 @@ export class AlertEngine {
         select: { telegramChatId: true },
       });
       if (!user?.telegramChatId) return; // not linked -> skip silently
+
+      // Check notification preferences
+      if (notificationType) {
+        const prefs = await prisma.userPreferences.findUnique({
+          where: { userId },
+        });
+        if (prefs) {
+          const prefMap: Record<string, boolean | undefined> = {
+            signature_request: prefs.telegramOnSent,
+            approval: prefs.telegramOnApproval,
+            completed: prefs.telegramOnCompleted,
+            rejected: prefs.telegramOnRejected,
+            expiring: prefs.telegramOnExpiring,
+            reminder: prefs.telegramOnReminder,
+            security_alert: prefs.telegramSecurityAlerts,
+          };
+          if (notificationType in prefMap && prefMap[notificationType] === false) {
+            return; // user disabled this notification type
+          }
+        }
+      }
+
       await sendTelegramMessage(user.telegramChatId, text, {
         parse_mode: "Markdown",
         ...(buttons ? { reply_markup: { inline_keyboard: [buttons] } } : {}),
         disable_web_page_preview: true,
       });
+
+      // Log the sent message
+      await prisma.telegramMessageLog.create({
+        data: {
+          userId,
+          chatId: user.telegramChatId,
+          messageType: notificationType || "general",
+          content: text.slice(0, 1000),
+          status: "sent",
+        },
+      });
     } catch (err) {
       const e = err as TelegramError;
       console.error("[AlertEngine] Telegram notify failed:", e.message);
+      // Log the failed message
+      try {
+        await prisma.telegramMessageLog.create({
+          data: {
+            userId,
+            chatId: "",
+            messageType: notificationType || "general",
+            content: text.slice(0, 1000),
+            status: "failed",
+            error: e.message.slice(0, 500),
+          },
+        });
+      } catch {
+        // Ignore logging errors
+      }
     }
   }
 
@@ -381,7 +430,7 @@ export class AlertEngine {
       },
     });
 
-    // Send Telegram notification with a direct "Sign Document" button
+    // Send Telegram notification with a full action menu (review, OTP, sign)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const stepUser = await prisma.user.findUnique({
       where: { id: step.userId },
@@ -391,15 +440,42 @@ export class AlertEngine {
       ? await prisma.signer.findFirst({
           where: { documentId, email: stepUser.email },
           orderBy: { order: 'asc' },
-          select: { token: true },
+          select: { token: true, role: true },
         })
       : null;
     if (signer) {
-      await this.notifyTelegram(
-        step.userId,
-        `✍️ *Signature required*\nStep ${currentStep}/${totalSteps}: "${step.name}"\nDocument: *${documentTitle}*`,
-        [{ text: 'Sign Document', callback_data: `open:${signer.token}` }]
-      );
+      // Send rich action menu via Telegram
+      const user = await prisma.user.findUnique({
+        where: { id: step.userId },
+        select: { telegramChatId: true },
+      });
+      if (user?.telegramChatId) {
+        const buttons: InlineKeyboardButton[][] = [
+          [
+            { text: '👁 Review', callback_data: `review:${signer.token}` },
+            { text: '📥 Sign Now', url: `${appUrl}/sign/${signer.token}` },
+          ],
+          [
+            { text: '🔐 Request OTP', callback_data: `otp:${signer.token}` },
+            { text: '📋 Actions', callback_data: `menu:${signer.token}` },
+          ],
+        ];
+
+        await this.notifyTelegram(
+          step.userId,
+          `✍️ *Signature Required*\nStep ${currentStep}/${totalSteps}: "${step.name}"\nDocument: *${documentTitle}*\n\nChoose an action:`,
+          buttons.flat(),
+          'signature_request'
+        );
+      } else {
+        // Fallback: simple link button
+        await this.notifyTelegram(
+          step.userId,
+          `✍️ *Signature required*\nStep ${currentStep}/${totalSteps}: "${step.name}"\nDocument: *${documentTitle}*`,
+          [{ text: 'Sign Document', callback_data: `open:${signer.token}` }],
+          'signature_request'
+        );
+      }
     }
 
     // Send email notification
@@ -442,6 +518,67 @@ export class AlertEngine {
   }
 
   /**
+   * Notify a signer that a document has been sent to them with full action menu
+   */
+  async notifyDocumentSentToSigner(
+    signerEmail: string,
+    documentTitle: string,
+    documentId: string,
+    signerToken: string,
+    signerRole: string,
+    expiresAt?: Date | null
+  ): Promise<void> {
+    // Find the signer's user account
+    const user = await prisma.user.findFirst({
+      where: { email: signerEmail },
+      select: { id: true, telegramChatId: true },
+    });
+
+    if (!user?.telegramChatId) return; // not linked -> skip
+
+    // Check preferences
+    const prefs = await prisma.userPreferences.findUnique({
+      where: { userId: user.id },
+    });
+    if (prefs?.telegramOnSent === false) return;
+
+    try {
+      await sendDocumentActionMenu(
+        user.telegramChatId,
+        signerToken,
+        documentTitle,
+        signerRole,
+        expiresAt
+      );
+
+      await prisma.telegramMessageLog.create({
+        data: {
+          userId: user.id,
+          chatId: user.telegramChatId,
+          messageType: 'document_sent',
+          content: `Document sent notification: ${documentTitle}`,
+          status: 'sent',
+        },
+      });
+    } catch (err) {
+      const e = err as TelegramError;
+      console.error('[AlertEngine] Telegram document-sent notify failed:', e.message);
+      try {
+        await prisma.telegramMessageLog.create({
+          data: {
+            userId: user.id,
+            chatId: user.telegramChatId,
+            messageType: 'document_sent',
+            content: `Document sent notification: ${documentTitle}`,
+            status: 'failed',
+            error: e.message.slice(0, 500),
+          },
+        });
+      } catch { /* ignore */ }
+    }
+  }
+
+  /**
    * Notify document owner about status changes
    */
   async notifyDocumentOwner(
@@ -479,9 +616,12 @@ export class AlertEngine {
     });
 
     // Notify owner over Telegram (Markdown)
+    const telegramNotifType = status === 'completed' ? 'completed' : status === 'rejected' ? 'rejected' : 'general';
     await this.notifyTelegram(
       ownerId,
-      `📄 *${title}*\n"${documentTitle}"`
+      `📄 *${title}*\n"${documentTitle}"`,
+      undefined,
+      telegramNotifType
     );
 
     const user = await prisma.user.findUnique({ where: { id: ownerId } });

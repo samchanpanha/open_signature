@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user.id, email: user.email, name: user.name, telegramChatId: user.telegramChatId, telegramLinkedAt: user.telegramLinkedAt },
     });
   } catch (error) {
     console.error('Register error:', error);

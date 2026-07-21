@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   FileText, Upload, Plus, Trash2, ArrowLeft, LogOut, PenLine,
   CalendarDays, Type, Send, Download, Copy, Check, Eye, Users,
@@ -10,7 +11,7 @@ import {
   FileDown, XCircle, AlertTriangle, Save, Building2, UserPlus, Settings,
   GripVertical, UserCog, Crown, ArrowRight, List, CheckSquare, Circle,
   Share2, FolderOpen, FileEdit, History, Bell, GitCompareArrows, Mail,
-  Palette, Workflow, Contact as ContactIcon,
+  Workflow, MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +24,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Progress } from '@/components/ui/progress';
 import OnboardingTour from '@/components/onboarding-tour';
 import { ContactAutocomplete } from '@/components/contact-autocomplete';
-import { TeamMemberManager } from '@/components/permissions/team-member-manager';
 import { ShareDocumentDialog } from '@/components/permissions/share-document-dialog';
 import { ShareTemplateDialog } from '@/components/permissions/share-template-dialog';
 import { BulkSendDialog } from '@/components/bulk-send-dialog';
@@ -39,11 +39,7 @@ import { AvatarUpload } from '@/components/avatar-upload';
 import { DocumentComparison } from '@/components/document-comparison';
 import { DocumentReminders } from '@/components/document-reminders';
 import { ExpiryWarnings } from '@/components/expiry-warnings';
-import { WebhookManager } from '@/components/webhook-manager';
-import { WorkflowManager } from '@/components/workflows/workflow-manager';
-import { ContactGroupsManager } from '@/components/contacts/contact-groups-manager';
 import { BrandLogo } from '@/components/brand-logo';
-import { brandingApi } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/dashboard-skeleton';
 import { DocumentSkeleton } from '@/components/document-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -53,8 +49,9 @@ import { DocumentStatusBadge } from '@/components/document-status-badge';
 import { QuickShareDialog } from '@/components/quick-share-dialog';
 import { VersionDiff } from '@/components/version-diff';
 import { SigningOrder } from '@/components/signing-order';
+import { TelegramConnect } from '@/components/telegram-connect';
 import { useAppStore, type AppView, type User } from '@/lib/store';
-import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, webhooksApi, emailTemplatesApi, apiKeysApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, type OrgListItem, type DocumentListItem,   type DocumentDetail, type SignerInfo, type Contact, type Folder, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
+import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, telegramApi, type OrgListItem, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder } from '@/lib/api';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from 'next-themes';
@@ -310,6 +307,7 @@ function UploadSignature({ onSave }: { onSave: (dataUrl: string) => void }) {
 // ============ MAIN APP ============
 export default function Home() {
   const store = useAppStore();
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authLoading, setAuthLoading] = useState(false);
@@ -335,16 +333,9 @@ export default function Home() {
   // Organizations
   const [orgs, setOrgs] = useState<OrgListItem[]>([]);
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
-  const [orgDetail, setOrgDetail] = useState<import('@/lib/api').OrgDetail | null>(null);
-  const [orgDetailLoading, setOrgDetailLoading] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('member');
-  const [inviting, setInviting] = useState(false);
   const [createOrgDialog, setCreateOrgDialog] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
-  const [deleteOrgConfirm, setDeleteOrgConfirm] = useState(false);
-  const [deletingOrg, setDeletingOrg] = useState(false);
   const [currentOrgRole, setCurrentOrgRole] = useState<string | null>(null);
 
   // Editor
@@ -436,6 +427,7 @@ export default function Home() {
   const [otpRequested, setOtpRequested] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpMethod, setOtpMethod] = useState<'email' | 'telegram'>('email');
 
   // Contacts
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -478,26 +470,11 @@ export default function Home() {
   });
   const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
 
+  // Telegram
+  const [showTelegramConnect, setShowTelegramConnect] = useState(false);
+
   // Keyboard shortcuts
   const [showShortcuts, setShowShortcuts] = useState(false);
-
-  // Org Settings Tabs
-  const [orgSettingsTab, setOrgSettingsTab] = useState<'members' | 'webhooks' | 'api-keys' | 'email-templates' | 'branding' | 'workflows' | 'contacts'>('members');
-  const [brandingForm, setBrandingForm] = useState<{ name: string; logoUrl: string; brandColor: string; customDomain: string }>({ name: '', logoUrl: '', brandColor: '#10b981', customDomain: '' });
-  const [brandingSaving, setBrandingSaving] = useState(false);
-  const [showCreateKey, setShowCreateKey] = useState(false);
-  const [newKeyName, setNewKeyName] = useState('');
-  const [newKeyScopes, setNewKeyScopes] = useState<string[]>([]);
-  const [newKeyPlain, setNewKeyPlain] = useState<string | null>(null);
-  const [orgWebhooks, setOrgWebhooks] = useState<Webhook[]>([]);
-  const [orgEmailTemplates, setOrgEmailTemplates] = useState<EmailTemplate[]>([]);
-  const [orgApiKeys, setOrgApiKeys] = useState<ApiKey[]>([]);
-
-  // Email Preview State
-  const [previewEmailTemplate, setPreviewEmailTemplate] = useState<any>(null);
-  const [emailPreviewHtml, setEmailPreviewHtml] = useState('');
-  const [emailPreviewSubject, setEmailPreviewSubject] = useState('');
-  const [emailPreviewLoading, setEmailPreviewLoading] = useState(false);
 
   // Keep placedFields ref in sync
   useEffect(() => {
@@ -644,93 +621,6 @@ export default function Home() {
       }
     } else {
       setCurrentOrgRole(null);
-    }
-  };
-
-  const loadOrgDetail = useCallback(async (orgId: string) => {
-    setOrgDetailLoading(true);
-    try {
-      const detail = await orgApi.get(orgId);
-      setOrgDetail(detail);
-      setBrandingForm({
-        name: detail.name || '',
-        logoUrl: detail.logoUrl || '',
-        brandColor: detail.brandColor || '#10b981',
-        customDomain: detail.customDomain || '',
-      });
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to load organization');
-      store.closeOrgSettings();
-    } finally {
-      setOrgDetailLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (store.orgSettingsOpen && store.orgSettingsOrgId) {
-      loadOrgDetail(store.orgSettingsOrgId);
-    } else {
-      setOrgDetail(null);
-    }
-  }, [store.orgSettingsOpen, store.orgSettingsOrgId, loadOrgDetail]);
-
-  const handleInviteMember = async () => {
-    if (!store.orgSettingsOrgId || !inviteEmail.trim()) return;
-    setInviting(true);
-    try {
-      await orgApi.inviteMember(store.orgSettingsOrgId, inviteEmail.trim(), inviteRole);
-      toast.success('Member invited successfully!');
-      setInviteEmail('');
-      setInviteRole('member');
-      loadOrgDetail(store.orgSettingsOrgId);
-      loadOrgs();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to invite member');
-    } finally {
-      setInviting(false);
-    }
-  };
-
-  const handleUpdateMemberRole = async (memberId: string, newRole: string) => {
-    if (!store.orgSettingsOrgId) return;
-    try {
-      await orgApi.updateMemberRole(store.orgSettingsOrgId, memberId, newRole);
-      toast.success('Role updated');
-      loadOrgDetail(store.orgSettingsOrgId);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update role');
-    }
-  };
-
-  const handleRemoveMember = async (memberId: string) => {
-    if (!store.orgSettingsOrgId) return;
-    try {
-      await orgApi.removeMember(store.orgSettingsOrgId, memberId);
-      toast.success('Member removed');
-      loadOrgDetail(store.orgSettingsOrgId);
-      loadOrgs();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to remove member');
-    }
-  };
-
-  const handleDeleteOrg = async () => {
-    if (!store.orgSettingsOrgId) return;
-    setDeletingOrg(true);
-    try {
-      await orgApi.delete(store.orgSettingsOrgId);
-      toast.success('Organization deleted');
-      setDeleteOrgConfirm(false);
-      store.closeOrgSettings();
-      if (store.currentOrgId === store.orgSettingsOrgId) {
-        store.setCurrentOrgId(null);
-      }
-      loadOrgs();
-      loadDocuments();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete organization');
-    } finally {
-      setDeletingOrg(false);
     }
   };
 
@@ -1480,12 +1370,13 @@ export default function Home() {
   const textUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // OTP handlers
-  const handleRequestOtp = async () => {
+  const handleRequestOtp = async (method: 'email' | 'telegram' = 'email') => {
     if (!store.signingToken) return;
     try {
-      await otpApi.requestOtp(store.signingToken);
+      setOtpMethod(method);
+      await otpApi.requestOtp(store.signingToken, method);
       setOtpRequested(true);
-      toast.success('OTP code sent to your email');
+      toast.success(method === 'telegram' ? 'OTP code sent to your Telegram' : 'OTP code sent to your email');
     } catch (err: any) {
       toast.error(err.message || 'Failed to send OTP');
     }
@@ -1517,28 +1408,6 @@ export default function Home() {
   }, []);
 
   // Folders loader
-  // Org settings data loader
-  const loadOrgSettingsData = useCallback(async (orgId: string) => {
-    try {
-      const [wh, et] = await Promise.all([
-        webhooksApi.list(orgId),
-        emailTemplatesApi.list(orgId),
-      ]);
-      setOrgWebhooks(wh);
-      setOrgEmailTemplates(et);
-    } catch { /* ok */ }
-    try {
-      const keys = await apiKeysApi.list(orgId);
-      setOrgApiKeys(keys);
-    } catch { /* ok */ }
-  }, []);
-
-  useEffect(() => {
-    if (store.orgSettingsOpen && store.orgSettingsOrgId) {
-      loadOrgSettingsData(store.orgSettingsOrgId);
-    }
-  }, [store.orgSettingsOpen, store.orgSettingsOrgId, loadOrgSettingsData]);
-
   // Notification preferences loader
   useEffect(() => {
     if (store.user) {
@@ -1565,28 +1434,6 @@ export default function Home() {
       toast.error('Failed to save preferences');
     } finally {
       setNotifPrefsLoading(false);
-    }
-  };
-
-  const handlePreviewEmailTemplate = async (template: any) => {
-    setPreviewEmailTemplate(template);
-    setEmailPreviewLoading(true);
-    try {
-      const res = await fetch(`/api/email-templates/${template.id}/preview`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}` 
-        },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      setEmailPreviewHtml(data.html || '');
-      setEmailPreviewSubject(data.subject || '');
-    } catch {
-      setEmailPreviewHtml('<p>Failed to load preview</p>');
-    } finally {
-      setEmailPreviewLoading(false);
     }
   };
 
@@ -1735,13 +1582,18 @@ export default function Home() {
                     </div>
                     <h2 className="text-lg font-semibold">Verify Your Identity</h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                      A one-time code has been sent to <span className="font-medium">{signingInfo.signer.email}</span>
+                      Choose how to receive your verification code
                     </p>
                   </div>
                   {!otpRequested ? (
-                    <Button onClick={handleRequestOtp} className="w-full bg-emerald-600 hover:bg-emerald-700">
-                      <Send className="w-4 h-4 mr-2" /> Send Verification Code
-                    </Button>
+                    <div className="space-y-2">
+                      <Button onClick={() => handleRequestOtp('email')} className="w-full bg-emerald-600 hover:bg-emerald-700">
+                        <Send className="w-4 h-4 mr-2" /> Send via Email
+                      </Button>
+                      <Button onClick={() => handleRequestOtp('telegram')} variant="outline" className="w-full">
+                        <MessageCircle className="w-4 h-4 mr-2" /> Send via Telegram
+                      </Button>
+                    </div>
                   ) : (
                     <div className="space-y-3">
                       <Input
@@ -1760,7 +1612,7 @@ export default function Home() {
                         {otpVerifying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
                         Verify
                       </Button>
-                      <Button variant="ghost" size="sm" className="w-full" onClick={() => { setOtpRequested(false); setOtpCode(''); }}>
+                      <Button variant="ghost" size="sm" className="w-full" onClick={async () => { setOtpRequested(false); setOtpCode(''); await handleRequestOtp(otpMethod); }}>
                         Resend Code
                       </Button>
                     </div>
@@ -2342,7 +2194,7 @@ export default function Home() {
                       {currentOrg && canManageTeam && (
                         <button
                           className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
-                          onClick={() => { setOrgDropdownOpen(false); store.openOrgSettings(currentOrg.id); }}
+                          onClick={() => { setOrgDropdownOpen(false); router.push(`/org/${currentOrg.id}/settings`); }}
                         >
                           <Settings className="w-4 h-4" />
                           Org Settings
@@ -2359,6 +2211,26 @@ export default function Home() {
               />
               <span className="text-sm text-muted-foreground hidden sm:block">{store.user.email}</span>
               {store.user && <NotificationBadge userId={store.user.id} />}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-10 w-10 ${store.user?.telegramChatId ? 'text-[#0088cc]' : ''}`}
+                onClick={() => setShowTelegramConnect(true)}
+                aria-label="Telegram integration"
+                title={store.user?.telegramChatId ? 'Telegram connected' : 'Connect Telegram'}
+              >
+                <MessageCircle className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10"
+                onClick={() => window.location.href = '/workflows'}
+                aria-label="Workflow builder"
+                title="Workflow Builder"
+              >
+                <Workflow className="w-4 h-4" />
+              </Button>
               <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setShowNotifPrefs(true)} aria-label="Notification settings">
                 <Bell className="w-4 h-4" />
               </Button>
@@ -2381,7 +2253,7 @@ export default function Home() {
                 <span className="text-emerald-600 dark:text-emerald-400">{currentOrg.documentCount} docs</span>
               </div>
               {canManageTeam && (
-                <Button variant="ghost" size="sm" onClick={() => store.openOrgSettings(currentOrg.id)} className="text-emerald-700 dark:text-emerald-400">
+                <Button variant="ghost" size="sm" onClick={() => router.push(`/org/${currentOrg.id}/settings`)} className="text-emerald-700 dark:text-emerald-400">
                   <UserCog className="w-4 h-4" />
                 </Button>
               )}
@@ -3084,336 +2956,6 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
-        {/* Org Settings Dialog */}
-        <Dialog open={store.orgSettingsOpen} onOpenChange={(open) => { if (!open) store.closeOrgSettings(); }}>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-emerald-600" /> Organization Settings
-              </DialogTitle>
-            </DialogHeader>
-
-            {orgDetailLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : orgDetail ? (
-              <div className="max-h-[60vh] overflow-y-auto">
-                {/* Org info header */}
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <Building2 className="w-6 h-6 text-emerald-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">{orgDetail.name}</h3>
-                      <p className="text-sm text-muted-foreground">Created {formatDateOnly(orgDetail.createdAt)}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 text-xs text-muted-foreground">
-                    <Badge variant="secondary">{orgDetail.members.length} members</Badge>
-                    <Badge variant="secondary">{orgDetail.documentCount} documents</Badge>
-                  </div>
-                </div>
-
-                {/* Settings Tabs */}
-                <Tabs value={orgSettingsTab} onValueChange={(v) => setOrgSettingsTab(v as any)}>
-                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-7 mb-4">
-                    <TabsTrigger value="members" className="text-xs"><Users className="w-3 h-3 mr-1" /> Members</TabsTrigger>
-                    <TabsTrigger value="branding" className="text-xs"><Palette className="w-3 h-3 mr-1" /> Brand</TabsTrigger>
-                    <TabsTrigger value="workflows" className="text-xs"><Workflow className="w-3 h-3 mr-1" /> Flows</TabsTrigger>
-                    <TabsTrigger value="contacts" className="text-xs"><ContactIcon className="w-3 h-3 mr-1" /> Contacts</TabsTrigger>
-                    <TabsTrigger value="webhooks" className="text-xs"><Send className="w-3 h-3 mr-1" /> Hooks</TabsTrigger>
-                    <TabsTrigger value="api-keys" className="text-xs"><Shield className="w-3 h-3 mr-1" /> Keys</TabsTrigger>
-                    <TabsTrigger value="email-templates" className="text-xs"><FileText className="w-3 h-3 mr-1" /> Email</TabsTrigger>
-                  </TabsList>
-
-                  {/* Members Tab */}
-                  <TabsContent value="members" className="space-y-4">
-                    <TeamMemberManager
-                      orgId={store.orgSettingsOrgId || ''}
-                      currentUserId={store.user?.id || ''}
-                      currentUserRole={orgDetail.members.find(m => m.user.id === store.user?.id)?.role || 'member'}
-                    />
-                    {orgDetail.ownerId === store.user?.id && (
-                      <>
-                        <Separator />
-                        {!deleteOrgConfirm ? (
-                          <Button variant="outline" className="w-full text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20 border-red-200 dark:border-red-800" onClick={() => setDeleteOrgConfirm(true)}>
-                            <Trash2 className="w-4 h-4 mr-2" /> Delete Organization
-                          </Button>
-                        ) : (
-                          <div className="border border-red-200 dark:border-red-800 rounded-lg p-4 space-y-3">
-                            <p className="text-sm text-red-700 dark:text-red-400 font-medium"><AlertTriangle className="w-4 h-4 inline mr-1" /> This will permanently delete the organization.</p>
-                            <div className="flex gap-2">
-                              <Button variant="outline" size="sm" onClick={() => setDeleteOrgConfirm(false)} className="flex-1">Cancel</Button>
-                              <Button size="sm" className="flex-1 bg-red-600 hover:bg-red-700" onClick={handleDeleteOrg} disabled={deletingOrg}>
-                                {deletingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Trash2 className="w-4 h-4 mr-1" /> Delete</>}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </TabsContent>
-
-                  {/* Branding Tab */}
-                  <TabsContent value="branding" className="space-y-4">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <BrandLogo className="w-12 h-12" textClassName="font-bold text-xl" />
-                        <p className="text-xs text-muted-foreground">Live preview of your organization's branding.</p>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Organization Name</label>
-                        <Input
-                          value={brandingForm.name}
-                          onChange={(e) => setBrandingForm({ ...brandingForm, name: e.target.value })}
-                          placeholder={currentOrg?.name || 'Organization name'}
-                          className="h-9"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Logo URL</label>
-                        <Input
-                          value={brandingForm.logoUrl}
-                          onChange={(e) => setBrandingForm({ ...brandingForm, logoUrl: e.target.value })}
-                          placeholder="https://.../logo.png"
-                          className="h-9"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Brand Color</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={brandingForm.brandColor}
-                            onChange={(e) => setBrandingForm({ ...brandingForm, brandColor: e.target.value })}
-                            className="w-10 h-9 rounded border cursor-pointer"
-                          />
-                          <Input
-                            value={brandingForm.brandColor}
-                            onChange={(e) => setBrandingForm({ ...brandingForm, brandColor: e.target.value })}
-                            className="h-9 font-mono"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Custom Domain</label>
-                        <Input
-                          value={brandingForm.customDomain}
-                          onChange={(e) => setBrandingForm({ ...brandingForm, customDomain: e.target.value })}
-                          placeholder="sign.yourcompany.com"
-                          className="h-9"
-                        />
-                      </div>
-                      <Button
-                        className="w-full gradient-primary text-white"
-                        disabled={brandingSaving}
-                        onClick={async () => {
-                          try {
-                            setBrandingSaving(true);
-                            await brandingApi.update({
-                              ...(brandingForm.name.trim() ? { name: brandingForm.name.trim() } : {}),
-                              ...(brandingForm.logoUrl.trim() ? { logoUrl: brandingForm.logoUrl.trim() } : { logoUrl: '' }),
-                              brandColor: brandingForm.brandColor,
-                              ...(brandingForm.customDomain.trim() ? { customDomain: brandingForm.customDomain.trim() } : { customDomain: '' }),
-                            });
-                            toast.success('Branding updated');
-                            loadOrgs();
-                          } catch (err: any) {
-                            toast.error(err.message || 'Failed to update branding');
-                          } finally {
-                            setBrandingSaving(false);
-                          }
-                        }}
-                      >
-                        {brandingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Palette className="w-4 h-4 mr-2" /> Save Branding</>}
-                      </Button>
-                    </div>
-                  </TabsContent>
-
-                  {/* Workflows Tab */}
-                  <TabsContent value="workflows" className="space-y-4">
-                    {store.orgSettingsOrgId && (
-                      <WorkflowManager
-                        orgId={store.orgSettingsOrgId}
-                        orgRole={currentOrgRole || 'member'}
-                      />
-                    )}
-                  </TabsContent>
-
-                  {/* Contacts Tab */}
-                  <TabsContent value="contacts" className="space-y-4">
-                    <ContactGroupsManager />
-                  </TabsContent>
-
-                  {/* Webhooks Tab */}
-                  <TabsContent value="webhooks" className="space-y-4">
-                    <WebhookManager />
-                    {orgWebhooks.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">No webhooks configured</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {orgWebhooks.map(wh => (
-                          <div key={wh.id} className="flex items-center justify-between p-2 rounded-lg border">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium truncate">{wh.url}</p>
-                              <p className="text-xs text-muted-foreground">{JSON.parse(wh.events).join(', ')}</p>
-                            </div>
-                            <Badge variant={wh.isActive ? 'default' : 'secondary'}>{wh.isActive ? 'Active' : 'Inactive'}</Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  {/* API Keys Tab */}
-                  <TabsContent value="api-keys" className="space-y-4">
-                    <Button variant="outline" className="w-full" onClick={() => { setNewKeyName(''); setNewKeyScopes([]); setNewKeyPlain(null); setShowCreateKey(true); }}>
-                      <Plus className="w-4 h-4 mr-2" /> Create API Key
-                    </Button>
-                    {orgApiKeys.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">No API keys</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {orgApiKeys.map(k => (
-                          <div key={k.id} className="flex items-center justify-between p-2 rounded-lg border">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium">{k.name}</p>
-                              <p className="text-xs text-muted-foreground">Created {formatDateOnly(k.createdAt)}</p>
-                            </div>
-                            <Badge variant={k.isActive ? 'default' : 'secondary'}>{k.isActive ? 'Active' : 'Revoked'}</Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  {/* Create API Key Dialog */}
-                  <Dialog open={showCreateKey} onOpenChange={(v) => { if (!v) setShowCreateKey(false); }}>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Create API Key</DialogTitle>
-                        <DialogDescription>
-                          Use this key in the <code>x-api-key</code> header to authenticate API requests.
-                        </DialogDescription>
-                      </DialogHeader>
-                      {newKeyPlain ? (
-                        <div className="space-y-3">
-                          <p className="text-sm text-muted-foreground">Copy your key now. It will not be shown again.</p>
-                          <div className="p-3 bg-muted rounded-lg break-all text-xs font-mono">{newKeyPlain}</div>
-                          <Button className="w-full gradient-primary text-white" onClick={() => { setShowCreateKey(false); if (store.orgSettingsOrgId) loadOrgSettingsData(store.orgSettingsOrgId); }}>
-                            Done
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Key Name</label>
-                            <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. CI Pipeline" className="h-9" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Scopes</label>
-                            <div className="flex flex-wrap gap-2">
-                              {['document:read', 'document:create', 'document:update', 'document:delete', 'template:read', 'template:create'].map((scope) => {
-                                const active = newKeyScopes.includes(scope);
-                                return (
-                                  <button
-                                    key={scope}
-                                    type="button"
-                                    onClick={() => setNewKeyScopes(active ? newKeyScopes.filter((s) => s !== scope) : [...newKeyScopes, scope])}
-                                    className={`text-xs px-2 py-1 rounded-full border ${active ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'text-muted-foreground'}`}
-                                  >
-                                    {scope}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          <Button
-                            className="w-full gradient-primary text-white"
-                            disabled={!newKeyName.trim() || !store.orgSettingsOrgId}
-                            onClick={async () => {
-                              try {
-                                const res = await apiKeysApi.create({
-                                  name: newKeyName.trim(),
-                                  permissions: newKeyScopes,
-                                  orgId: store.orgSettingsOrgId!,
-                                });
-                                setNewKeyPlain(res.key);
-                                toast.success('API key created');
-                              } catch (err: any) {
-                                toast.error(err.message || 'Failed to create key');
-                              }
-                            }}
-                          >
-                            <Plus className="w-4 h-4 mr-2" /> Generate Key
-                          </Button>
-                        </div>
-                      )}
-                    </DialogContent>
-                  </Dialog>
-
-                  {/* Email Templates Tab */}
-                  <TabsContent value="email-templates" className="space-y-4">
-                    {orgEmailTemplates.length === 0 ? (
-                      <Button variant="outline" className="w-full" onClick={() => { if (store.orgSettingsOrgId) emailTemplatesApi.seed(store.orgSettingsOrgId).then(() => loadOrgSettingsData(store.orgSettingsOrgId!)); }}>
-                        <Plus className="w-4 h-4 mr-2" /> Seed Default Templates
-                      </Button>
-                    ) : (
-                      <div className="space-y-2">
-                        {orgEmailTemplates.map(et => (
-                          <div key={et.id} className="p-2 rounded-lg border">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm font-medium">{et.name}</p>
-                                {et.isDefault && <Badge variant="secondary">Default</Badge>}
-                              </div>
-                              <Button variant="ghost" size="sm" onClick={() => handlePreviewEmailTemplate(et)}>
-                                <Eye className="w-3.5 h-3.5" />
-                              </Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">Subject: {et.subject}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">Failed to load organization details.</p>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Email Preview Dialog */}
-        <Dialog open={!!previewEmailTemplate} onOpenChange={(v) => { if (!v) setPreviewEmailTemplate(null); }}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Email Preview: {previewEmailTemplate?.name}</DialogTitle>
-            </DialogHeader>
-            {emailPreviewSubject && (
-              <div className="px-4 py-2 bg-muted rounded-lg text-sm">
-                <span className="font-medium">Subject: </span>{emailPreviewSubject}
-              </div>
-            )}
-            {emailPreviewLoading ? (
-              <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
-            ) : (
-              <div className="border rounded-lg overflow-hidden bg-white">
-                <iframe
-                  srcDoc={emailPreviewHtml}
-                  className="w-full min-h-[400px]"
-                  sandbox="allow-same-origin"
-                  title="Email preview"
-                />
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
         <DocumentComparison
           documents={filteredDocuments}
           open={compareDialogOpen}
@@ -4058,23 +3600,34 @@ export default function Home() {
           </DialogContent>
         </Dialog>
 
-        {sharingDocId && (
-          <ShareDocumentDialog
-            open={!!sharingDocId}
-            onOpenChange={(open) => { if (!open) { setSharingDocId(null); setSharingDocTitle(''); } }}
-            documentId={sharingDocId}
-            documentTitle={sharingDocTitle}
-          />
-        )}
+        <TelegramConnect
+          open={showTelegramConnect}
+          onOpenChange={setShowTelegramConnect}
+          isLinked={!!store.user?.telegramChatId}
+          onLinkChange={(linked) => {
+            if (store.user) {
+              store.setAuth(
+                { ...store.user, telegramChatId: linked ? 'linked' : null, telegramLinkedAt: linked ? new Date().toISOString() : null },
+                store.token!
+              );
+            }
+          }}
+          telegramChatId={store.user?.telegramChatId}
+        />
 
-        {sharingTemplateId && (
-          <ShareTemplateDialog
-            open={!!sharingTemplateId}
-            onOpenChange={(open) => { if (!open) { setSharingTemplateId(null); setSharingTemplateName(''); } }}
-            templateId={sharingTemplateId}
-            templateName={sharingTemplateName}
-          />
-        )}
+        <ShareDocumentDialog
+          open={!!sharingDocId}
+          onOpenChange={(open) => { if (!open) { setSharingDocId(null); setSharingDocTitle(''); } }}
+          documentId={sharingDocId || ''}
+          documentTitle={sharingDocTitle}
+        />
+
+        <ShareTemplateDialog
+          open={!!sharingTemplateId}
+          onOpenChange={(open) => { if (!open) { setSharingTemplateId(null); setSharingTemplateName(''); } }}
+          templateId={sharingTemplateId || ''}
+          templateName={sharingTemplateName}
+        />
 
         <BulkSendDialog
           open={bulkSendOpen}

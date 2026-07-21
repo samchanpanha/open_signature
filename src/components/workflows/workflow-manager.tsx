@@ -11,11 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
-  Plus, Trash2, GripVertical, Users, ArrowRight, ArrowDown,
-  Check, X, Settings, Play, Pause, Copy, Eye
+  Plus, Trash2, GripVertical, ArrowRight, ArrowDown,
+  X, Settings, Play, Pause, Eye, Workflow, LayoutGrid
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { workflowsApi, orgApi, type WorkflowListItem, type WorkflowDetail, type WorkflowStep, type OrgMember } from '@/lib/api';
+import { workflowsApi, orgApi, type WorkflowListItem, type WorkflowDetail, type OrgMember } from '@/lib/api';
+import { WorkflowCanvas } from './workflow-canvas';
 
 interface WorkflowManagerProps {
   orgId: string;
@@ -29,6 +30,8 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDetail | null>(null);
+  const [editorMode, setEditorMode] = useState<'list' | 'visual'>('list');
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
 
   // Create form state
   const [newName, setNewName] = useState('');
@@ -157,58 +160,145 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
             <CardTitle className="text-lg">Signature Workflows</CardTitle>
             <CardDescription>Configure multi-step signing workflows for documents</CardDescription>
           </div>
-          {canManage && (
-            <Button size="sm" onClick={() => { resetForm(); setCreateOpen(true); }}>
-              <Plus className="w-4 h-4 mr-1" /> New Workflow
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <div className="flex items-center border rounded-lg p-1">
+                <Button
+                  variant={editorMode === 'list' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setEditorMode('list')}
+                  className="h-7 px-2"
+                >
+                  <Settings className="w-3 h-3 mr-1" />
+                  List
+                </Button>
+                <Button
+                  variant={editorMode === 'visual' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setEditorMode('visual')}
+                  className="h-7 px-2"
+                >
+                  <LayoutGrid className="w-3 h-3 mr-1" />
+                  Visual
+                </Button>
+              </div>
+            )}
+            {canManage && (
+              <Button size="sm" onClick={() => { resetForm(); setCreateOpen(true); }}>
+                <Plus className="w-4 h-4 mr-1" /> New Workflow
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          {workflows.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Settings className="w-10 h-10 mx-auto mb-3 opacity-50" />
-              <p>No workflows created yet.</p>
-              {canManage && <p className="text-sm mt-1">Create a workflow to define multi-step signing processes.</p>}
+          {editorMode === 'visual' ? (
+            <div className="space-y-4">
+              {workflows.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                  <Workflow className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                  <p>No workflows created yet.</p>
+                  {canManage && <p className="text-sm mt-1">Create a workflow to start designing.</p>}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {workflows.map(wf => (
+                    <div key={wf.id} className="border rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-3 bg-muted/30">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full ${wf.isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                          <div>
+                            <h4 className="font-medium text-sm">{wf.name}</h4>
+                            {wf.description && <p className="text-xs text-muted-foreground">{wf.description}</p>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={wf.isActive ? 'default' : 'secondary'} className="text-xs">
+                            {wf.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                          <Badge variant="outline" className="text-xs">{wf.steps.length} nodes</Badge>
+                          {editingWorkflowId === wf.id ? (
+                            <Button size="sm" variant="ghost" onClick={() => setEditingWorkflowId(null)}>
+                              <X className="w-3 h-3" />
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="ghost" onClick={() => setEditingWorkflowId(wf.id)}>
+                              <Eye className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      {(editingWorkflowId === wf.id || wf.steps.some((s: any) => s.positionX || s.positionY)) && (
+                        <div className="border-t">
+                          <WorkflowCanvas
+                            workflowId={wf.id}
+                            initialNodes={(wf as any).steps?.map((s: any) => ({
+                              id: s.id,
+                              type: s.stepType || 'sign',
+                              name: s.name,
+                              x: s.positionX || 0,
+                              y: s.positionY || 0,
+                              config: s.config || {},
+                            })) || []}
+                            initialEdges={(wf as any).edges || []}
+                            orgMembers={members.map(m => ({ id: m.user.id, name: m.user.name, email: m.user.email }))}
+                            readonly={!canManage}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
-            <div className="space-y-3">
-              {workflows.map(wf => (
-                <div
-                  key={wf.id}
-                  className="border rounded-lg p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => { setSelectedWorkflow(wf as WorkflowDetail); setDetailOpen(true); }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${wf.isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-                      <div>
-                        <h4 className="font-medium">{wf.name}</h4>
-                        {wf.description && <p className="text-sm text-muted-foreground">{wf.description}</p>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={wf.isActive ? 'default' : 'secondary'}>
-                        {wf.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                      <Badge variant="outline">{wf.steps.length} steps</Badge>
-                      <Badge variant="outline">{wf.documentCount} docs</Badge>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 mt-3 overflow-x-auto">
-                    {wf.steps.map((step, i) => (
-                      <div key={step.id} className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-xs whitespace-nowrap">
-                          {step.order}. {step.user.name}
-                        </Badge>
-                        {i < wf.steps.length - 1 && (
-                          <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
+            <>
+              {workflows.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Settings className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                  <p>No workflows created yet.</p>
+                  {canManage && <p className="text-sm mt-1">Create a workflow to define multi-step signing processes.</p>}
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="space-y-3">
+                  {workflows.map(wf => (
+                    <div
+                      key={wf.id}
+                      className="border rounded-lg p-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => { setSelectedWorkflow(wf as WorkflowDetail); setDetailOpen(true); }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2 h-2 rounded-full ${wf.isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                          <div>
+                            <h4 className="font-medium">{wf.name}</h4>
+                            {wf.description && <p className="text-sm text-muted-foreground">{wf.description}</p>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={wf.isActive ? 'default' : 'secondary'}>
+                            {wf.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                          <Badge variant="outline">{wf.steps.length} steps</Badge>
+                          <Badge variant="outline">{wf.documentCount} docs</Badge>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 mt-3 overflow-x-auto">
+                        {wf.steps.map((step, i) => (
+                          <div key={step.id} className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-xs whitespace-nowrap">
+                              {step.order}. {step.user.name}
+                            </Badge>
+                            {i < wf.steps.length - 1 && (
+                              <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

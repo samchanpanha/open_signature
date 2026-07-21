@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     const user = await db.user.findUnique({
       where: { id: payload.userId as string },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, telegramChatId: true, telegramLinkedAt: true },
     });
 
     if (!user) {

@@ -93,6 +93,8 @@ model User {
   preferences      UserPreferences?
   comments         DocumentComment[]
   telegramBindings TelegramBinding[]
+  telegramMessages TelegramMessageLog[]
+  telegramSessions TelegramSession[]
 }
 
 model UserPreferences {
@@ -104,6 +106,15 @@ model UserPreferences {
   emailOnRejected  Boolean  @default(true)
   emailOnExpiring  Boolean  @default(true)
   emailOnReminder  Boolean  @default(true)
+  telegramOnSent      Boolean  @default(true)
+  telegramOnCompleted Boolean  @default(true)
+  telegramOnRejected  Boolean  @default(true)
+  telegramOnExpiring  Boolean  @default(true)
+  telegramOnReminder  Boolean  @default(true)
+  telegramOnApproval  Boolean  @default(true)
+  telegramDailySummary  Boolean  @default(false)
+  telegramWeeklySummary Boolean  @default(false)
+  telegramSecurityAlerts Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -408,32 +419,79 @@ model SignatureWorkflow {
   orgId       String
   createdBy   String
   isActive    Boolean  @default(true)
+  layoutConfig String? // JSON: canvas zoom, pan, etc.
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   creator User        @relation(fields: [createdBy], references: [id])
   steps   WorkflowStep[]
+  edges   WorkflowEdge[]
   documents Document[]
 
   @@unique([orgId, name])
 }
 
 model WorkflowStep {
-  id          String   @id @default(cuid())
-  name        String
-  order       Int
-  stepType    String   @default("sign") // sign, approve, review, cc
-  userId      String
-  workflowId  String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  order           Int
+  stepType        String   @default("sign") // sign, approve, review, cc, condition, parallel, start, end
+  userId          String
+  workflowId      String
+  positionX       Float    @default(0)
+  positionY       Float    @default(0)
+  conditionRules  String?  // JSON: {"field":"amount","operator":">","value":"1000","trueNext":2,"falseNext":3}
+  nodeConfig      String?  // JSON: node-specific config (colors, icons, etc.)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   workflow SignatureWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   user     User              @relation(fields: [userId], references: [id])
 
   @@unique([workflowId, order])
-  @@unique([workflowId, userId])
+}
+
+model WorkflowEdge {
+  id          String   @id @default(cuid())
+  sourceStepId String
+  targetStepId String
+  label       String?  // e.g. "Approved", "Rejected", "Yes", "No"
+  edgeType    String   @default("default") // default, condition_true, condition_false, parallel
+  workflowId  String
+  createdAt   DateTime @default(now())
+
+  workflow SignatureWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, sourceStepId, targetStepId])
+}
+
+model WorkflowTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String   @default("general") // general, hr, finance, legal, sales, custom
+  icon        String?  // lucide icon name
+  steps       String   @default("[]") // JSON array of step definitions
+  edges       String   @default("[]") // JSON array of edge definitions
+  isPublic    Boolean  @default(true)
+  usageCount  Int      @default(0)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // JSON string
+  category  String   @default("general") // general, security, notifications, integrations, branding, compliance
+  label     String
+  type      String   @default("string") // string, number, boolean, json, select
+  options   String?  // JSON: for select type, array of {label, value}
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
 }
 
 model Assignment {
@@ -482,6 +540,33 @@ model TelegramBinding {
   createdAt   DateTime @default(now())
 
   user User? @relation(fields: [linkedUserId], references: [id], onDelete: SetNull)
+}
+
+model TelegramMessageLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  chatId      String
+  messageType String   // signature_request, approval, completed, reminder, daily_summary, weekly_summary, security_alert
+  documentId  String?
+  content     String
+  status      String   @default("sent") // sent, failed, pending
+  error       String?
+  sentAt      DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model TelegramSession {
+  id          String   @id @default(cuid())
+  userId      String?
+  chatId      String
+  deviceInfo  String?
+  ipAddress   String?
+  isActive    Boolean  @default(true)
+  lastActiveAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
 
 model Reminder {

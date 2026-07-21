@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Share2, Trash2, UserPlus, Shield, Eye, Edit, CheckCircle } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Share2, Trash2, UserPlus, Shield, Eye, Edit, CheckCircle, MessageCircle, Copy, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { documentPermissionsApi, type DocumentPermission, type OrgMemberForDoc, type DocAccessEntry } from '@/lib/api';
+import { documentPermissionsApi, telegramApi, type DocumentPermission, type OrgMemberForDoc, type DocAccessEntry } from '@/lib/api';
 
 interface ShareDocumentDialogProps {
   open: boolean;
@@ -40,6 +41,16 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
   const [selectedMember, setSelectedMember] = useState('');
   const [selectedAction, setSelectedAction] = useState('read');
   const [adding, setAdding] = useState(false);
+  const [telegramLink, setTelegramLink] = useState<string | null>(null);
+
+  const loadTelegramLink = useCallback(async () => {
+    try {
+      const { deepLink } = await telegramApi.getDeepLink('document', documentId);
+      setTelegramLink(deepLink);
+    } catch {
+      // Telegram not configured
+    }
+  }, [documentId]);
 
   const loadPermissions = async () => {
     setLoading(true);
@@ -48,8 +59,9 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
       setPermissions(data.permissions);
       setOrgMembers(data.orgMembers);
       setAllAccess(data.allAccess || []);
-    } catch (error) {
-      console.error('Failed to load permissions:', error);
+      loadTelegramLink();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load permissions');
     } finally {
       setLoading(false);
     }
@@ -189,6 +201,39 @@ export function ShareDocumentDialog({ open, onOpenChange, documentId, documentTi
                     </Button>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Share via Telegram */}
+          {telegramLink && (
+            <div className="border-t pt-4">
+              <label className="text-sm font-medium mb-2 block flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-[#0088cc]" />
+                Share via Telegram
+              </label>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => {
+                    window.open(`https://t.me/share/url?url=${encodeURIComponent(telegramLink)}&text=${encodeURIComponent(`Sign: ${documentTitle}`)}`, '_blank');
+                  }}
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  Send to Chat
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(telegramLink);
+                    toast.success('Telegram link copied!');
+                  }}
+                >
+                  <Copy className="w-3 h-3" />
+                </Button>
               </div>
             </div>
           )}

@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
           include: { user: { select: { id: true, email: true, name: true } } },
           orderBy: { order: 'asc' },
         },
+        edges: true,
         creator: { select: { id: true, email: true, name: true } },
         _count: { select: { documents: true } },
       },
@@ -42,6 +43,17 @@ export async function GET(req: NextRequest) {
         order: s.order,
         stepType: s.stepType,
         user: s.user,
+        x: s.positionX,
+        y: s.positionY,
+        config: s.nodeConfig ? JSON.parse(s.nodeConfig) : {},
+        conditionRules: s.conditionRules ? JSON.parse(s.conditionRules) : null,
+      })),
+      edges: w.edges.map(e => ({
+        id: e.id,
+        source: e.sourceStepId,
+        target: e.targetStepId,
+        label: e.label,
+        type: e.edgeType,
       })),
       createdAt: w.createdAt,
       updatedAt: w.updatedAt,
@@ -58,7 +70,7 @@ export async function POST(req: NextRequest) {
     const user = getAuthUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { name, description, orgId, steps } = await req.json();
+    const { name, description, orgId, steps, edges, layoutConfig } = await req.json();
 
     if (!name?.trim()) return NextResponse.json({ error: 'Workflow name is required' }, { status: 400 });
     if (!orgId) return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
@@ -72,44 +84,69 @@ export async function POST(req: NextRequest) {
 
     // Verify all step users are org members
     for (const step of steps) {
-      let userId = step.userId;
-      if (!userId && step.userEmail) {
-        const memberUser = await db.user.findUnique({ where: { email: step.userEmail } });
-        if (!memberUser) return NextResponse.json({ error: `User ${step.userEmail} not found` }, { status: 400 });
-        userId = memberUser.id;
-        step.userId = userId;
-      }
-      const member = await db.organizationMember.findFirst({
-        where: { userId: step.userId, orgId },
-      });
-      if (!member) {
-        return NextResponse.json({ error: `User ${step.userId} is not a member of this organization` }, { status: 400 });
+      if (step.userId) {
+        const member = await db.organizationMember.findFirst({
+          where: { userId: step.userId, orgId },
+        });
+        if (!member) {
+          return NextResponse.json({ error: `User ${step.userId} is not a member of this organization` }, { status: 400 });
+        }
       }
     }
 
+    // Create workflow with steps and edges
     const workflow = await db.signatureWorkflow.create({
       data: {
         name: name.trim(),
         description: description?.trim() || null,
         orgId,
         createdBy: user.userId,
+        layoutConfig: layoutConfig ? JSON.stringify(layoutConfig) : null,
         steps: {
           create: steps.map((s: any, i: number) => ({
             name: s.name || `Step ${i + 1}`,
             order: i + 1,
-            stepType: s.stepType || 'sign',
-            userId: s.userId,
+            stepType: s.type || s.stepType || 'sign',
+            userId: s.userId || user.userId,
+            positionX: s.x || s.positionX || 0,
+            positionY: s.y || s.positionY || 0,
+            conditionRules: s.conditionRules ? JSON.stringify(s.conditionRules) : null,
+            nodeConfig: s.config ? JSON.stringify(s.config) : null,
           })),
         },
       },
       include: {
-        steps: {
-          include: { user: { select: { id: true, email: true, name: true } } },
-          orderBy: { order: 'asc' },
-        },
+        steps: true,
         creator: { select: { id: true, email: true, name: true } },
       },
     });
+
+    // Create edges if provided
+    if (edges && Array.isArray(edges)) {
+      const stepIdMap: Record<string, string> = {};
+      workflow.steps.forEach((dbStep, i) => {
+        const originalStep = steps[i];
+        if (originalStep?.id) {
+          stepIdMap[originalStep.id] = dbStep.id;
+        }
+      });
+
+      for (const edge of edges) {
+        const sourceId = stepIdMap[edge.source];
+        const targetId = stepIdMap[edge.target];
+        if (sourceId && targetId) {
+          await db.workflowEdge.create({
+            data: {
+              sourceStepId: sourceId,
+              targetStepId: targetId,
+              label: edge.label || null,
+              edgeType: edge.type || 'default',
+              workflowId: workflow.id,
+            },
+          });
+        }
+      }
+    }
 
     return NextResponse.json({
       id: workflow.id,
@@ -122,7 +159,6 @@ export async function POST(req: NextRequest) {
         name: s.name,
         order: s.order,
         stepType: s.stepType,
-        user: s.user,
       })),
       createdAt: workflow.createdAt,
     }, { status: 201 });

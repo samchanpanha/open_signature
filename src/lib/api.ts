@@ -27,11 +27,11 @@ export const authApi = {
       body: JSON.stringify({ email, name, password }),
     }),
   login: (email: string, password: string) =>
-    request<{ token?: string; user?: { id: string; email: string; name: string }; requiresPasswordSetup?: boolean; message?: string }>('/api/auth/login', {
+    request<{ token?: string; user?: { id: string; email: string; name: string; telegramChatId?: string | null; telegramLinkedAt?: string | null }; requiresPasswordSetup?: boolean; message?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
-  me: () => request<{ id: string; email: string; name: string }>('/api/auth/me'),
+  me: () => request<{ id: string; email: string; name: string; telegramChatId?: string | null; telegramLinkedAt?: string | null }>('/api/auth/me'),
   setupPassword: (email: string, password: string) =>
     request<{ success: boolean; message: string }>('/api/auth/setup-password', {
       method: 'POST',
@@ -377,7 +377,7 @@ export const workflowsApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  update: (id: string, data: { name?: string; description?: string; isActive?: boolean; steps?: { name: string; stepType: string; userId: string }[] }) =>
+  update: (id: string, data: { name?: string; description?: string; isActive?: boolean; steps?: { id?: string; name: string; stepType: string; userId?: string; x?: number; y?: number; config?: any; conditionRules?: any }[]; edges?: { source: string; target: string; label?: string; type?: string }[] }) =>
     request<WorkflowListItem>(`/api/workflows/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -395,8 +395,11 @@ export const workflowsApi = {
 
 // OTP Verification
 export const otpApi = {
-  requestOtp: (token: string) =>
-    request<{ success: boolean }>(`/api/sign/${token}/request-otp`, { method: 'POST' }),
+  requestOtp: (token: string, method?: 'email' | 'sms' | 'telegram') =>
+    request<{ success: boolean; method: string }>(`/api/sign/${token}/request-otp`, {
+      method: 'POST',
+      body: JSON.stringify({ method: method || 'email' }),
+    }),
   verifyOtp: (token: string, code: string) =>
     request<{ success: boolean }>(`/api/sign/${token}/verify-otp`, {
       method: 'POST',
@@ -944,4 +947,51 @@ export const onboardingApi = {
   getStatus: () => request<{ steps: string[]; totalSteps: number; isComplete: boolean }>('/api/onboarding'),
   completeStep: (step: string) =>
     request<{ completedSteps: string[] }>('/api/onboarding', { method: 'POST', body: JSON.stringify({ step }) }),
+};
+
+// Telegram
+export interface TelegramConnectInfo {
+  linked: boolean;
+  chatId?: string;
+  token?: string;
+  deepLink?: string;
+}
+
+export interface TelegramLinkStatus {
+  linked: boolean;
+  chatId?: string | null;
+}
+
+export interface TelegramBotInfo {
+  username: string;
+  id: number;
+}
+
+export interface TelegramStats {
+  totalLinked: number;
+  messagesSent: number;
+  messagesFailed: number;
+  activeSessions: number;
+}
+
+export const telegramApi = {
+  connect: () => request<TelegramConnectInfo>('/api/telegram/connect'),
+  linkStatus: (token: string) =>
+    request<TelegramLinkStatus>(`/api/telegram/link?token=${token}`),
+  botInfo: () => request<TelegramBotInfo>('/api/telegram/bot-info'),
+  unlink: () => request<{ success: boolean }>('/api/telegram/unlink', { method: 'POST' }),
+  getPreferences: () =>
+    request<{ preferences: Record<string, boolean> }>('/api/telegram/preferences'),
+  updatePreferences: (prefs: Record<string, boolean>) =>
+    request<{ success: boolean }>('/api/telegram/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    }),
+  getSessions: () =>
+    request<{ sessions: Array<{ id: string; chatId: string; deviceInfo?: string; lastActiveAt: string; isActive: boolean }> }>('/api/telegram/sessions'),
+  revokeSession: (sessionId: string) =>
+    request<{ success: boolean }>(`/api/telegram/sessions/${sessionId}`, { method: 'DELETE' }),
+  getStats: () => request<TelegramStats>('/api/telegram/stats'),
+  getDeepLink: (type: string, id: string) =>
+    request<{ deepLink: string; bot: string }>(`/api/telegram/deeplink?type=${type}&id=${id}`),
 };

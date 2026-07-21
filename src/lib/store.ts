@@ -6,6 +6,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  telegramChatId?: string | null;
+  telegramLinkedAt?: string | null;
 }
 
 interface AppState {
@@ -34,13 +36,6 @@ interface AppState {
   // Organization
   currentOrgId: string | null;  // null = personal, string = org id
   setCurrentOrgId: (id: string | null) => void;
-
-  // Org settings dialog
-  orgSettingsOpen: boolean;
-  setOrgSettingsOpen: (open: boolean) => void;
-  orgSettingsOrgId: string | null;
-  openOrgSettings: (orgId: string) => void;
-  closeOrgSettings: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -69,10 +64,4 @@ export const useAppStore = create<AppState>((set) => ({
 
   currentOrgId: null,
   setCurrentOrgId: (id) => set({ currentOrgId: id }),
-
-  orgSettingsOpen: false,
-  setOrgSettingsOpen: (open) => set({ orgSettingsOpen: open }),
-  orgSettingsOrgId: null,
-  openOrgSettings: (orgId) => set({ orgSettingsOpen: true, orgSettingsOrgId: orgId }),
-  closeOrgSettings: () => set({ orgSettingsOpen: false, orgSettingsOrgId: null }),
 }));

@@ -96,3 +96,101 @@ export async function deleteWebhook(): Promise<unknown> {
 export async function getMe(): Promise<{ username: string; id: number }> {
   return api("getMe", {});
 }
+
+export async function deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {
+  try {
+    await api("deleteMessage", { chat_id: chatId, message_id: messageId });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function editMessageText(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  options?: {
+    parse_mode?: "Markdown" | "MarkdownV2" | "HTML";
+    reply_markup?: { inline_keyboard: InlineKeyboardButton[][] };
+    disable_web_page_preview?: boolean;
+  }
+): Promise<TelegramMessage> {
+  return api<TelegramMessage>("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    ...options,
+  });
+}
+
+export async function sendOtpViaTelegram(
+  chatId: string | number,
+  code: string,
+  documentTitle: string
+): Promise<TelegramMessage> {
+  return sendTelegramMessage(
+    chatId,
+    `🔐 *Verification Code*\n\n` +
+    `Your OTP for *${documentTitle}* is:\n\n` +
+    `\`${code}\`\n\n` +
+    `⏰ Expires in 10 minutes.\n` +
+    `_Do not share this code with anyone._`,
+    { parse_mode: "Markdown" }
+  );
+}
+
+export async function sendDocumentActionMenu(
+  chatId: string | number,
+  signerToken: string,
+  documentTitle: string,
+  role: string,
+  expiresAt?: Date | null
+): Promise<TelegramMessage> {
+  const appUrl = process.env.TELEGRAM_MINI_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const expiryLine = expiresAt ? `\n⏰ Expires: ${new Date(expiresAt).toLocaleDateString()}` : "";
+
+  let buttons: InlineKeyboardButton[][];
+
+  if (role === "approver") {
+    buttons = [
+      [
+        { text: "👁 Review", callback_data: `review:${signerToken}` },
+        { text: "📥 Sign", url: `${appUrl}/sign/${signerToken}` },
+      ],
+      [
+        { text: "✅ Approve", callback_data: `approve:${signerToken}` },
+        { text: "❌ Reject", callback_data: `reject:${signerToken}` },
+      ],
+      [{ text: "🔐 Request OTP", callback_data: `otp:${signerToken}` }],
+    ];
+  } else if (role === "viewer") {
+    buttons = [
+      [
+        { text: "👁 Review", callback_data: `review:${signerToken}` },
+        { text: "📥 Open", url: `${appUrl}/sign/${signerToken}` },
+      ],
+    ];
+  } else {
+    buttons = [
+      [
+        { text: "👁 Review", callback_data: `review:${signerToken}` },
+        { text: "📥 Sign Now", url: `${appUrl}/sign/${signerToken}` },
+      ],
+      [
+        { text: "🔐 Request OTP", callback_data: `otp:${signerToken}` },
+        { text: "✏️ Edit Fields", url: `${appUrl}/sign/${signerToken}` },
+      ],
+      [{ text: "❌ Reject", callback_data: `reject:${signerToken}` }],
+    ];
+  }
+
+  return sendTelegramMessage(
+    chatId,
+    `📋 *Document Action Required*\n\n` +
+    `📄 *${documentTitle}*\n` +
+    `👤 Role: ${role}${expiryLine}\n\n` +
+    `Choose an action:`,
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } }
+  );
+}

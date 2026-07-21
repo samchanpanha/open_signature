@@ -144,6 +144,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const alertEngine = getAlertEngine();
         await alertEngine.notifyWorkflowStep(firstStep, document.title, id, 1, workflow.steps.length, document.organizationId ?? undefined);
       }
+    } else {
+      // No workflow: send Telegram action menus to each signer
+      const alertEngine = getAlertEngine();
+      for (let i = 0; i < signerData.length; i++) {
+        const s = signerData[i];
+        const signer = await db.signer.findFirst({
+          where: { documentId: id, email: s.email },
+          orderBy: { order: 'asc' },
+          select: { token: true, role: true },
+        });
+        if (signer) {
+          await alertEngine.notifyDocumentSentToSigner(
+            s.email,
+            document.title,
+            id,
+            signer.token,
+            signer.role,
+            computedExpiresAt
+          );
+        }
+      }
     }
 
     await db.auditLog.create({

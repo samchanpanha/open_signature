@@ -199,3 +199,69 @@ Stage Summary:
 - Build passes cleanly (npx next build)
 
 ---
+Task ID: 15
+Agent: Workflow Builder Agent
+Task: Build dynamic drag-and-drop conditional workflow builder
+
+Work Log:
+- Created WorkflowCanvas component (src/components/workflows/workflow-canvas.tsx):
+  - SVG-based visual canvas with drag-and-drop node positioning
+  - 6 node types: Start, End, Sign, Approve, Review, CC, Condition, Parallel
+  - Visual edge connections with curved paths and arrow markers
+  - Condition nodes with diamond shape and true/false branching
+  - Property panel for node configuration (user assignment, conditions, timeouts)
+  - Sidebar with node palette and auto-layout functionality
+  - Connection mode: click output point then input point to create edges
+  - Condition evaluation: field/operator/value with 6 operators
+  - Parallel branch support with visual indicators
+  - Readonly mode for viewers
+
+- Created WorkflowEngine (src/lib/workflow-engine.ts):
+  - Condition evaluation engine with 8 condition fields and 8 operators
+  - BFS-based workflow traversal
+  - 8 pre-built workflow templates seeded to database:
+    - Simple Sign, Two-Party Sign, Approve then Sign
+    - Finance Approval (amount-based branching)
+    - Parallel Signatures, HR Onboarding
+    - Legal Review (approval-based branching), Sales Contract
+
+- Created API routes:
+  - GET/POST /api/workflows/[id]/edges - Manage workflow edges
+  - GET/POST /api/workflows/templates - List/create from templates
+
+- Updated existing workflow routes:
+  - GET/POST /api/workflows - Now supports nodes with positions, edges, layoutConfig
+  - GET/PUT/DELETE /api/workflows/[id] - Full visual editor support
+
+- Created pages:
+  - /workflows - Workflow list with template browser and visual previews
+  - /workflows/[id] - Full canvas editor for individual workflows
+
+- Updated WorkflowManager component:
+  - Added List/Visual mode toggle
+  - Visual mode shows canvas preview for each workflow
+  - Integrated with WorkflowCanvas for inline editing
+
+- Added navigation:
+  - Workflow button in dashboard header (next to Telegram)
+  - Workflows accessible via Org Settings > Flows tab
+
+- Docker rebuilt and verified:
+  - All pages load correctly (/workflows, /workflows/[id])
+  - Templates API returns Unauthorized (expected - requires auth)
+  - No errors in Docker logs
+
+Database Models Used:
+- SignatureWorkflow (with layoutConfig, edges relation)
+- WorkflowStep (with positionX, positionY, conditionRules, nodeConfig)
+- WorkflowEdge (sourceStepId, targetStepId, edgeType, label)
+- WorkflowTemplate (steps JSON, edges JSON, category, usageCount)
+
+Stage Summary:
+- Complete visual drag-and-drop workflow builder
+- 8 pre-built templates for common business workflows
+- Condition branching (if/else) with field-based evaluation
+- Parallel execution paths
+- Full CRUD for workflows with visual editor
+- Integrated into org settings and standalone pages
+- Docker deployment verified

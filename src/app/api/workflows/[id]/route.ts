@@ -17,6 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           include: { user: { select: { id: true, email: true, name: true } } },
           orderBy: { order: 'asc' },
         },
+        edges: true,
         creator: { select: { id: true, email: true, name: true } },
         documents: {
           select: { id: true, title: true, status: true, createdAt: true },
@@ -34,12 +35,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       description: workflow.description,
       isActive: workflow.isActive,
       createdBy: workflow.creator,
+      layoutConfig: workflow.layoutConfig ? JSON.parse(workflow.layoutConfig) : null,
       steps: workflow.steps.map(s => ({
         id: s.id,
         name: s.name,
         order: s.order,
         stepType: s.stepType,
         user: s.user,
+        x: s.positionX,
+        y: s.positionY,
+        config: s.nodeConfig ? JSON.parse(s.nodeConfig) : {},
+        conditionRules: s.conditionRules ? JSON.parse(s.conditionRules) : null,
+      })),
+      edges: workflow.edges.map(e => ({
+        id: e.id,
+        source: e.sourceStepId,
+        target: e.targetStepId,
+        label: e.label,
+        type: e.edgeType,
       })),
       documents: workflow.documents,
       createdAt: workflow.createdAt,
@@ -68,56 +81,107 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Only owners and admins can update workflows' }, { status: 403 });
     }
 
-    const { name, description, isActive, steps } = body;
+    const { name, description, isActive, steps, edges, layoutConfig } = body;
 
-    // If steps are provided, replace them
-    if (steps && Array.isArray(steps)) {
-      // Delete existing steps
-      await db.workflowStep.deleteMany({ where: { workflowId: id } });
-
-      // Create new steps
-      for (let i = 0; i < steps.length; i++) {
-        const s = steps[i];
-        await db.workflowStep.create({
-          data: {
-            name: s.name || `Step ${i + 1}`,
-            order: i + 1,
-            stepType: s.stepType || 'sign',
-            userId: s.userId,
-            workflowId: id,
-          },
-        });
-      }
-    }
-
-    const updated = await db.signatureWorkflow.update({
+    // Update workflow basic info
+    await db.signatureWorkflow.update({
       where: { id },
       data: {
         ...(name !== undefined && { name: name.trim() }),
         ...(description !== undefined && { description: description?.trim() || null }),
         ...(isActive !== undefined && { isActive }),
+        ...(layoutConfig !== undefined && { layoutConfig: JSON.stringify(layoutConfig) }),
       },
+    });
+
+    // If steps are provided, replace them
+    if (steps && Array.isArray(steps)) {
+      // Delete existing steps and edges
+      await db.workflowEdge.deleteMany({ where: { workflowId: id } });
+      await db.workflowStep.deleteMany({ where: { workflowId: id } });
+
+      // Create new steps
+      const createdSteps: { original: any; db: any }[] = [];
+      for (let i = 0; i < steps.length; i++) {
+        const s = steps[i];
+        const step = await db.workflowStep.create({
+          data: {
+            name: s.name || `Step ${i + 1}`,
+            order: i + 1,
+            stepType: s.type || s.stepType || 'sign',
+            userId: s.userId || user.userId,
+            workflowId: id,
+            positionX: s.x || s.positionX || 0,
+            positionY: s.y || s.positionY || 0,
+            conditionRules: s.conditionRules ? JSON.stringify(s.conditionRules) : null,
+            nodeConfig: s.config ? JSON.stringify(s.config) : null,
+          },
+        });
+        createdSteps.push({ original: s, db: step });
+      }
+
+      // Create edges if provided
+      if (edges && Array.isArray(edges)) {
+        const stepIdMap: Record<string, string> = {};
+        createdSteps.forEach(({ original, db: dbStep }) => {
+          if (original.id) {
+            stepIdMap[original.id] = dbStep.id;
+          }
+        });
+
+        for (const edge of edges) {
+          const sourceId = stepIdMap[edge.source];
+          const targetId = stepIdMap[edge.target];
+          if (sourceId && targetId) {
+            await db.workflowEdge.create({
+              data: {
+                sourceStepId: sourceId,
+                targetStepId: targetId,
+                label: edge.label || null,
+                edgeType: edge.type || 'default',
+                workflowId: id,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    const updated = await db.signatureWorkflow.findUnique({
+      where: { id },
       include: {
         steps: {
           include: { user: { select: { id: true, email: true, name: true } } },
           orderBy: { order: 'asc' },
         },
+        edges: true,
       },
     });
 
     return NextResponse.json({
-      id: updated.id,
-      name: updated.name,
-      description: updated.description,
-      isActive: updated.isActive,
-      steps: updated.steps.map(s => ({
+      id: updated!.id,
+      name: updated!.name,
+      description: updated!.description,
+      isActive: updated!.isActive,
+      steps: updated!.steps.map(s => ({
         id: s.id,
         name: s.name,
         order: s.order,
         stepType: s.stepType,
         user: s.user,
+        x: s.positionX,
+        y: s.positionY,
+        config: s.nodeConfig ? JSON.parse(s.nodeConfig) : {},
+        conditionRules: s.conditionRules ? JSON.parse(s.conditionRules) : null,
       })),
-      updatedAt: updated.updatedAt,
+      edges: updated!.edges.map(e => ({
+        id: e.id,
+        source: e.sourceStepId,
+        target: e.targetStepId,
+        label: e.label,
+        type: e.edgeType,
+      })),
+      updatedAt: updated!.updatedAt,
     });
   } catch (error) {
     console.error('Update workflow error:', error);
@@ -147,6 +211,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return NextResponse.json({ error: `Cannot delete: ${docsUsing} document(s) use this workflow` }, { status: 400 });
     }
 
+    // Delete edges and steps first
+    await db.workflowEdge.deleteMany({ where: { workflowId: id } });
+    await db.workflowStep.deleteMany({ where: { workflowId: id } });
     await db.signatureWorkflow.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error) {
