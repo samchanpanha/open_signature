@@ -21,8 +21,9 @@ import {
   Clock, CheckCircle2, XCircle, AlertTriangle, File,
   ArrowUpRight, ArrowDownRight, BarChart3, Activity,
   LogOut, Sun, Moon, FolderOpen, Send, Eye, MoreHorizontal,
-  RefreshCw, Download, Zap, Building2,
+  RefreshCw, Download, Zap, Building2, Crown,
 } from 'lucide-react';
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { toast } from 'sonner';
 
 interface DashboardData {
@@ -72,6 +73,7 @@ const navItems = [
   { id: 'workflows', label: 'Workflows', icon: Workflow },
   { id: 'team', label: 'Team', icon: Users },
   { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'super-admin', label: 'System Admin', icon: Crown, isSuperAdmin: true },
 ];
 
 const statusColors: Record<string, string> = {
@@ -89,6 +91,17 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeNav, setActiveNav] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    try {
+      const token = localStorage.getItem('token');
+      if (token) {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setIsSuperAdmin(!!payload.isSuperAdmin);
+      }
+    } catch {}
+  }, []);
 
   const fetchDashboard = useCallback(async () => {
     setLoading(true);
@@ -199,13 +212,16 @@ export default function DashboardPage() {
 
         {/* Nav */}
         <nav className="flex-1 p-2 space-y-1">
-          {navItems.map(item => (
+          {navItems
+            .filter(item => !item.isSuperAdmin || isSuperAdmin)
+            .map(item => (
             <button
               key={item.id}
               onClick={() => {
                 if (item.id === 'documents') router.push('/');
                 else if (item.id === 'workflows') router.push('/workflows');
                 else if (item.id === 'settings') router.push('/settings');
+                else if (item.id === 'super-admin') router.push('/admin/system');
                 else setActiveNav(item.id);
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -262,6 +278,7 @@ export default function DashboardPage() {
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <Bell className="w-4 h-4" />
             </Button>
+            <LanguageSwitcher />
             <Separator orientation="vertical" className="h-6" />
             <Button size="sm" className="gradient-primary text-white gap-1.5" onClick={() => router.push('/')}>
               <Plus className="w-3.5 h-3.5" />

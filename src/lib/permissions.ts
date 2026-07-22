@@ -7,6 +7,7 @@ export interface AuthUser {
   userId: string;
   email: string;
   name: string;
+  isSuperAdmin?: boolean;
   apiKeyId?: string;
   scopes?: string[];
 }
@@ -428,6 +429,7 @@ export function getAuthUser(req: NextRequest): AuthUser | null {
     userId: payload.userId as string,
     email: payload.email as string,
     name: payload.name as string,
+    isSuperAdmin: payload.isSuperAdmin as boolean | undefined,
   };
 }
 
@@ -490,6 +492,25 @@ export function withAuth<T extends NextRequest>(
     }
     return handler(req, user);
   };
+}
+
+/**
+ * Check if user is a super admin
+ */
+export async function isSuperAdmin(userId: string): Promise<boolean> {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { isSuperAdmin: true } });
+  return !!user?.isSuperAdmin;
+}
+
+/**
+ * Require super admin - returns error response if not
+ */
+export async function requireSuperAdmin(req: NextRequest): Promise<{ user: AuthUser; error?: NextResponse }> {
+  const user = await getAuthUserAsync(req);
+  if (!user) return { user: null as unknown as AuthUser, error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  const admin = await isSuperAdmin(user.userId);
+  if (!admin) return { user, error: NextResponse.json({ error: 'Forbidden: Super admin required' }, { status: 403 }) };
+  return { user, error: undefined };
 }
 
 /**

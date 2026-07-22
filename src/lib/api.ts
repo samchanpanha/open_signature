@@ -195,6 +195,16 @@ export interface SignerInfo {
   }[];
 }
 
+export interface SigningAllSigner {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  signedAt: string | null;
+  order: number;
+  rejectedAt: string | null;
+}
+
 export const documentsApi = {
   list: (orgId?: string | null, search?: string, signerEmail?: string, folderId?: string | null) => {
     const params = new URLSearchParams();
@@ -298,7 +308,7 @@ export const fieldsApi = {
 // Signing (guest)
 export const signingApi = {
   getInfo: (token: string) =>
-    request<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } }>(`/api/sign/${token}`),
+    request<{ signer: SignerInfo; allSigners: SigningAllSigner[]; document: { id: string; title: string; status: string; expiresAt?: string | null } }>(`/api/sign/${token}`),
   updateField: (token: string, fieldId: string, value: string) =>
     request(`/api/sign/${token}/field`, {
       method: 'PUT',

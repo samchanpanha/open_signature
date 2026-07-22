@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword, generateToken } from '@/lib/auth';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { createAuditLog, auditFromRequest } from '@/lib/audit';
 
 const LOGIN_RATE_LIMIT = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -55,11 +56,17 @@ export async function POST(req: NextRequest) {
       data: { lastLoginAt: new Date() },
     });
 
-    const token = generateToken({ userId: user.id, email: user.email });
+    const token = generateToken({ userId: user.id, email: user.email, isSuperAdmin: user.isSuperAdmin });
+
+    await createAuditLog(auditFromRequest(req, {
+      action: 'AUTH_LOGIN',
+      userId: user.id,
+      details: `User ${email} logged in`,
+    }));
 
     return NextResponse.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name, telegramChatId: user.telegramChatId, telegramLinkedAt: user.telegramLinkedAt },
+      user: { id: user.id, email: user.email, name: user.name, isSuperAdmin: user.isSuperAdmin, telegramChatId: user.telegramChatId, telegramLinkedAt: user.telegramLinkedAt },
     });
   } catch (error) {
     console.error('Login error:', error);

@@ -15,6 +15,7 @@ import { SettingsWorkflows } from '@/components/settings/tabs/settings-workflows
 import { SettingsCompliance } from '@/components/settings/tabs/settings-compliance';
 import { SettingsSystem } from '@/components/settings/tabs/settings-system';
 import { SettingsAdvanced } from '@/components/settings/tabs/settings-advanced';
+import { SettingsLanguage } from '@/components/settings/tabs/settings-language';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function SettingsContent() {
@@ -54,6 +55,7 @@ function SettingsContent() {
       case 'compliance': return <SettingsCompliance />;
       case 'system': return <SettingsSystem />;
       case 'advanced': return <SettingsAdvanced />;
+      case 'language': return <SettingsLanguage />;
       default: return <SettingsOverview />;
     }
   };

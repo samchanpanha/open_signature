@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   BarChart3, Settings, Shield, Bell, Palette, Puzzle, Users,
   Workflow, Lock, Server, Cog, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Zap,
+  Zap, Globe,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -24,6 +24,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'overview', label: 'Overview', icon: <BarChart3 className="w-4 h-4" />, description: 'Dashboard & stats', group: 'main' },
   { id: 'general', label: 'General', icon: <Settings className="w-4 h-4" />, description: 'App, locale, display', group: 'main' },
+  { id: 'language', label: 'Language', icon: <Globe className="w-4 h-4" />, description: 'Language & region', group: 'main' },
   { id: 'security', label: 'Security', icon: <Shield className="w-4 h-4" />, description: 'Auth, passwords, 2FA', group: 'main' },
   { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" />, description: 'Channels, alerts', group: 'main' },
   { id: 'branding', label: 'Branding', icon: <Palette className="w-4 h-4" />, description: 'Logo, colors, themes', group: 'main' },

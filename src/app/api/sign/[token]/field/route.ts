@@ -28,7 +28,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ toke
 
     if (!field) return NextResponse.json({ error: 'Field not found' }, { status: 404 });
 
-    if (!field.signerId) {
+    if (!field.signerId || field.signerId !== signer.id) {
       await db.documentField.update({
         where: { id: fieldId },
         data: { signerId: signer.id },

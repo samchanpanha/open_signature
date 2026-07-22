@@ -1,23 +1,46 @@
-:81 {
-	@transform_port_query {
-		query XTransformPort=*
-	}
+{
+	auto_https disable_redirects
+}
 
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
+:80 {
+	respond /health 200
+
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+
+		transport http {
+			read_timeout  300s
+			write_timeout 300s
 		}
 	}
 
-	handle {
-		reverse_proxy localhost:3000 {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
+
+localhost {
+	tls internal
+
+	respond /health 200
+
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+
+		transport http {
+			read_timeout  300s
+			write_timeout 300s
 		}
+	}
+
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}
 }

@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Generate JWT
-    const token = generateToken({ userId: user.id, email: user.email });
+    const token = generateToken({ userId: user.id, email: user.email, isSuperAdmin: user.isSuperAdmin });
 
     return NextResponse.json({
       token,
@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
         id: user.id,
         email: user.email,
         name: user.name,
+        isSuperAdmin: user.isSuperAdmin,
         telegramChatId: user.telegramChatId,
       },
     });

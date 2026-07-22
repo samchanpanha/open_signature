@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser } from '@/lib/permissions'
+import { getAuthUser, hasPermission } from '@/lib/permissions'
 
+async function canEditDocument(userId: string, documentId: string): Promise<boolean> {
+  const doc = await db.document.findFirst({ where: { id: documentId } });
+  if (!doc) return false;
+  if (doc.ownerId === userId) return true;
+  if (doc.organizationId) {
+    const allowed = await hasPermission(userId, doc.organizationId, 'document', 'update');
+    if (allowed) return true;
+  }
+  return false;
+}
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,10 +24,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const field = await db.documentField.findFirst({ where: { id } });
     if (!field) return NextResponse.json({ error: 'Field not found' }, { status: 404 });
 
-    const doc = await db.document.findFirst({
-      where: { id: field.documentId, ownerId: payload.userId as string },
-    });
-    if (!doc) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const allowed = await canEditDocument(payload.userId as string, field.documentId);
+    if (!allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     let signerIdUpdate = {};
     if (body.signerId !== undefined) {
@@ -79,10 +87,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const field = await db.documentField.findFirst({ where: { id } });
     if (!field) return NextResponse.json({ error: 'Field not found' }, { status: 404 });
 
-    const doc = await db.document.findFirst({
-      where: { id: field.documentId, ownerId: payload.userId as string },
-    });
-    if (!doc) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const allowed = await canEditDocument(payload.userId as string, field.documentId);
+    if (!allowed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     await db.documentField.delete({ where: { id } });
     return NextResponse.json({ success: true });

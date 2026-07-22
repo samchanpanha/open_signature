@@ -6,6 +6,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  isSuperAdmin?: boolean;
   telegramChatId?: string | null;
   telegramLinkedAt?: string | null;
 }

@@ -10,12 +10,13 @@ import { isS3Configured, uploadToS3 } from '@/lib/s3';
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
-const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.docx'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.docx', '.xlsx'];
 const MIME_MAP: Record<string, string> = {
   'application/pdf': 'pdf',
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
 };
 
 
@@ -201,8 +202,8 @@ export async function POST(req: NextRequest) {
     // Convert non-PDF files to PDF
     if (ext !== '.pdf') {
       try {
-        const pdfDoc = await PDFDocument.create();
         if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') {
+          const pdfDoc = await PDFDocument.create();
           const imageBytes = new Uint8Array(buffer);
           let image;
           if (ext === '.png') {
@@ -212,14 +213,14 @@ export async function POST(req: NextRequest) {
           }
           const page = pdfDoc.addPage([image.width, image.height]);
           page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+          buffer = Buffer.from(await pdfDoc.save());
         } else if (ext === '.docx') {
-          const { rgb } = await import('pdf-lib');
-          const page = pdfDoc.addPage([612, 792]);
-          const font = await pdfDoc.embedFont('Helvetica');
-          page.drawText(`Document: ${file.name}`, { x: 72, y: 720, size: 16, font, color: rgb(0, 0, 0) });
-          page.drawText('DOCX files are converted to PDF. The original content requires a DOCX renderer.', { x: 72, y: 680, size: 11, font, color: rgb(0.5, 0.5, 0.5) });
+          const { convertDocxToPdf } = await import('@/lib/docx-to-pdf');
+          buffer = Buffer.from(await convertDocxToPdf(Buffer.from(buffer)));
+        } else if (ext === '.xlsx') {
+          const { convertExcelToPdf } = await import('@/lib/excel-to-pdf');
+          buffer = Buffer.from(await convertExcelToPdf(Buffer.from(buffer)));
         }
-        buffer = Buffer.from(await pdfDoc.save());
       } catch (convErr) {
         console.error('File conversion error:', convErr);
         return NextResponse.json({ error: `Failed to convert ${ext} to PDF` }, { status: 500 });

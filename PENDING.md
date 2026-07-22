@@ -4,6 +4,14 @@
 - None currently in progress
 
 ## Completed
+- Super Admin role: Added `isSuperAdmin` field to User model, JWT includes it
+- Super Admin API: `/api/super-admin` (overview), `/api/super-admin/users` (CRUD), `/api/super-admin/orgs`, `/api/super-admin/impersonate`
+- Super Admin UI: `/admin/system` - Dashboard with stats, user management, org list, impersonation
+- Audit Log system: Extended AuditLog model with orgId, resourceType, resourceId, method, path, statusCode, duration, metadata
+- Audit Log API: `/api/super-admin/audit-logs` (filtered list), `/api/super-admin/audit-logs/export` (CSV)
+- Audit Log UI: `/admin/audit-logs` - Viewer with search, filters (action, resource type, date range), CSV export
+- Audit logging added to: login, register, document delete, document send, signing completion
+- Navigation: "System Admin" link in dashboard sidebar (visible only to super admins)
 - Permission-based filtering for template sharing dialog
 - Bulk send improvements (replaced window.prompt with proper dialog)
 - Fixed TypeScript errors (AuthUser.id alias, async params in API routes, form-templates page props)
@@ -28,8 +36,9 @@
 - Code quality: Split permission-templates route into proper Next.js route structure
 - Code quality: Fixed analytics route orgId to use query params
 
-## Next Up (from previous context)
+## Next Up
 - Test full end-to-end flow with browser verification (invite -> setup password -> login -> see filtered docs)
+- Assign first super admin: Run `npx prisma db execute --stdin` with SQL to set isSuperAdmin=true on desired user
 
 ## Notes
 - Dev server: `npx next dev -port 3001`
@@ -42,3 +51,4 @@
   (passes) and `npx next build` (passes). Not a regression from this work.
 - CRON_SECRET env: set it to enable the /api/reminders/process cron endpoint
   (disabled/401 when unset). Call via external scheduler (cron/Caddy/CI) every ~15 min.
+- To make a user super admin: `UPDATE User SET isSuperAdmin = 1 WHERE id = 'USER_ID';`

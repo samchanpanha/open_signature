@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 const TAB_INFO: Record<SettingsTab, { title: string; description: string }> = {
   overview: { title: 'Overview', description: 'Platform health and configuration summary' },
   general: { title: 'General', description: 'Application name, locale, and display preferences' },
+  language: { title: 'Language', description: 'Choose your preferred language for the interface' },
   security: { title: 'Security', description: 'Authentication, passwords, and access controls' },
   notifications: { title: 'Notifications', description: 'Email, Telegram, and alert preferences' },
   branding: { title: 'Branding', description: 'Logo, colors, and visual customization' },

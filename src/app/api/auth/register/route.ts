@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword, generateToken } from '@/lib/auth';
 import { isValidEmail, sanitizeString } from '@/lib/validation';
+import { createAuditLog, auditFromRequest } from '@/lib/audit';
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,11 +37,17 @@ export async function POST(req: NextRequest) {
       data: { email: sanitizedEmail, name: sanitizedName, password: hashedPassword },
     });
 
-    const token = generateToken({ userId: user.id, email: user.email });
+    const token = generateToken({ userId: user.id, email: user.email, isSuperAdmin: user.isSuperAdmin });
+
+    await createAuditLog(auditFromRequest(req, {
+      action: 'AUTH_REGISTER',
+      userId: user.id,
+      details: `New user registered: ${sanitizedEmail}`,
+    }));
 
     return NextResponse.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name, telegramChatId: user.telegramChatId, telegramLinkedAt: user.telegramLinkedAt },
+      user: { id: user.id, email: user.email, name: user.name, isSuperAdmin: user.isSuperAdmin, telegramChatId: user.telegramChatId, telegramLinkedAt: user.telegramLinkedAt },
     });
   } catch (error) {
     console.error('Register error:', error);

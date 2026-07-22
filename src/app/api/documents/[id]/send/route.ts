@@ -5,6 +5,7 @@ import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
 import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions'
 import { isValidEmail, sanitizeString } from '@/lib/validation'
+import { createAuditLog, auditFromRequest } from '@/lib/audit';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -177,6 +178,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         userAgent: req.headers.get('user-agent') || null,
       },
     });
+
+    await createAuditLog(auditFromRequest(req, {
+      action: 'DOCUMENT_SENT',
+      userId: payload.userId as string,
+      documentId: id,
+      resourceType: 'document',
+      resourceId: id,
+      details: `Document sent to ${signerData.map((s: { email: string }) => s.email).join(', ')}`,
+    }));
 
     // Dispatch webhook
     if (document.organizationId) {

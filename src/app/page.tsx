@@ -50,6 +50,7 @@ import { QuickShareDialog } from '@/components/quick-share-dialog';
 import { VersionDiff } from '@/components/version-diff';
 import { SigningOrder } from '@/components/signing-order';
 import { TelegramConnect } from '@/components/telegram-connect';
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { useAppStore, type AppView, type User } from '@/lib/store';
 import { authApi, documentsApi, fieldsApi, signingApi, templatesApi, signaturesApi, orgApi, workflowsApi, otpApi, certificateApi, contactsApi, foldersApi, remindersApi, revokeApi, rejectionApi, passwordApi, downloadLinkApi, telegramApi, type OrgListItem, type DocumentListItem, type DocumentDetail, type SignerInfo, type Contact, type Folder } from '@/lib/api';
 import { toast } from 'sonner';
@@ -402,7 +403,7 @@ export default function Home() {
   const [versionDiffOpen, setVersionDiffOpen] = useState(false);
 
   // Signing
-  const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; document: { id: string; title: string; status: string; expiresAt?: string | null } } | null>(null);
+  const [signingInfo, setSigningInfo] = useState<{ signer: SignerInfo; allSigners?: { id: string; name: string; email: string; role: string; signedAt: string | null; order: number; rejectedAt: string | null }[]; document: { id: string; title: string; status: string; expiresAt?: string | null } } | null>(null);
   const [signingPages, setSigningPages] = useState<{ dataUrl: string; width: number; height: number; pageNumber: number }[]>([]);
   const [signingPdfLoading, setSigningPdfLoading] = useState(false);
   const [signingFieldValues, setSigningFieldValues] = useState<Record<string, string>>({});
@@ -1697,6 +1698,22 @@ export default function Home() {
         )}
 
         <main className="flex-1 max-w-4xl mx-auto w-full p-4 space-y-4 pb-32">
+          {signingInfo.allSigners && signingInfo.allSigners.length > 1 && (
+            <div className="bg-background border rounded-lg p-3">
+              <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Signing Progress</p>
+              <div className="flex flex-wrap gap-2">
+                {signingInfo.allSigners.map((s) => (
+                  <div key={s.id} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border ${s.signedAt ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400' : s.rejectedAt ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400' : s.id === signingInfo.signer.id ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400' : 'bg-muted border-border text-muted-foreground'}`}>
+                    {s.signedAt ? <CheckCircle2 className="w-3 h-3" /> : s.rejectedAt ? <XCircle className="w-3 h-3" /> : s.id === signingInfo.signer.id ? <PenLine className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                    <span className="font-medium">{s.name || s.email}</span>
+                    {s.signedAt ? <span className="text-emerald-600">Signed</span> : s.rejectedAt ? <span className="text-red-600">Rejected</span> : s.id === signingInfo.signer.id ? <span className="text-blue-600">You</span> : <span>Pending</span>}
+                    {s.role !== 'signer' && <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">{s.role}</Badge>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
             <p className="text-sm text-amber-800 dark:text-amber-300">
@@ -2227,6 +2244,7 @@ export default function Home() {
               <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setShowNotifPrefs(true)} aria-label="Notification settings">
                 <Bell className="w-4 h-4" />
               </Button>
+              <LanguageSwitcher />
               <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={store.logout}>
                 <LogOut className="w-4 h-4" />

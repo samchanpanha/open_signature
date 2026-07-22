@@ -4,6 +4,7 @@ import { PDFDocument, rgb } from 'pdf-lib';
 import { getAlertEngine } from '@/lib/alerts/alert-engine';
 import { dispatchWebhook } from '@/lib/webhooks';
 import { readPdfStorage, writePdfStorage } from '@/lib/s3';
+import { createAuditLog, auditFromRequest } from '@/lib/audit';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   try {
@@ -56,6 +57,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         userAgent: req.headers.get('user-agent') || null,
       },
     });
+
+    await createAuditLog(auditFromRequest(req, {
+      action: 'DOCUMENT_SIGNED',
+      documentId: signer.documentId,
+      resourceType: 'document',
+      resourceId: signer.documentId,
+      details: `Signer ${signer.name} (${signer.email}) completed signing`,
+    }));
 
     // Dispatch webhook
     if (signer.document.organizationId) {

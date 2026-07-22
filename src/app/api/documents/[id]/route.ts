@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, getUserRole, hasPermission } from '@/lib/permissions';
 import { deletePdfStorage } from '@/lib/s3';
+import { createAuditLog, auditFromRequest } from '@/lib/audit';
 
 
 async function checkDocumentAccess(userId: string, documentId: string, action: 'read' | 'update' | 'delete' = 'read') {
@@ -138,6 +139,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     await db.document.delete({ where: { id } });
+
+    await createAuditLog(auditFromRequest(req, {
+      action: 'DOCUMENT_DELETE',
+      userId,
+      documentId: id,
+      resourceType: 'document',
+      resourceId: id,
+      details: `Document ${id} deleted`,
+    }));
 
     return NextResponse.json({ success: true });
   } catch (error) {

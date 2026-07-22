@@ -57,8 +57,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     });
 
     const signerFields = await db.documentField.findMany({
-      where: { signerId: signer.id },
+      where: {
+        documentId: signer.documentId,
+        OR: [
+          { signerId: signer.id },
+          { signerId: null },
+        ],
+      },
       orderBy: { pageNumber: 'asc' },
+    });
+
+    const allSignerDetails = await db.signer.findMany({
+      where: { documentId: signer.documentId },
+      orderBy: { order: 'asc' },
+      select: { id: true, name: true, email: true, role: true, signedAt: true, order: true, rejectedAt: true },
     });
 
     return NextResponse.json({
@@ -78,6 +90,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
           options: f.options ? JSON.parse(f.options) : null,
         })),
       },
+      allSigners: allSignerDetails.map((s) => ({
+        id: s.id, name: s.name, email: s.email, role: s.role,
+        signedAt: s.signedAt, order: s.order, rejectedAt: s.rejectedAt,
+      })),
       document: {
         id: signer.document.id,
         title: signer.document.title,

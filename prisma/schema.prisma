@@ -32,6 +32,7 @@ model Organization {
   folders   Folder[]
   usageStats UsageStat[]
   permissionTemplates PermissionTemplate[]
+  auditLogs AuditLog[]
 }
 
 model OrganizationMember {
@@ -59,6 +60,7 @@ model User {
   email     String   @unique
   name      String
   password  String
+  isSuperAdmin Boolean @default(false)
   company   String?
   jobTitle  String?
   phone     String?
@@ -320,18 +322,33 @@ model SavedSignature {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  action     String
-  ipAddress  String?
-  userAgent  String?
-  details    String?
-  documentId String?
-  userId     String?
-  signerId   String?
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  action       String
+  ipAddress    String?
+  userAgent    String?
+  details      String?
+  documentId   String?
+  userId       String?
+  signerId     String?
+  orgId        String?
+  resourceType String?
+  resourceId   String?
+  method       String?
+  path         String?
+  statusCode   Int?
+  duration     Int?
+  metadata     String?
+  createdAt    DateTime @default(now())
 
   document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org      Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([userId])
+  @@index([orgId])
+  @@index([resourceType])
+  @@index([createdAt])
 }
 
 model Permission {

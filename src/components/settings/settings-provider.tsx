@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 
-export type SettingsTab = 'overview' | 'general' | 'security' | 'notifications' | 'branding' | 'integrations' | 'team' | 'compliance' | 'system' | 'workflows' | 'advanced';
+export type SettingsTab = 'overview' | 'general' | 'security' | 'notifications' | 'branding' | 'integrations' | 'team' | 'compliance' | 'system' | 'workflows' | 'advanced' | 'language';
 
 export interface SystemSettings {
   general: {
