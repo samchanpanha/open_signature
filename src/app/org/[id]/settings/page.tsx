@@ -5,6 +5,7 @@ import { OrgSettingsProvider, useOrgSettings } from '@/components/org-settings/o
 import { OrgSettingsSidebar } from '@/components/org-settings/org-settings-sidebar';
 import { OrgSettingsLayout } from '@/components/org-settings/org-settings-layout';
 import { OrgMembersTab } from '@/components/org-settings/tabs/org-members';
+import { OrgStructureTab } from '@/components/org-settings/tabs/org-structure';
 import { OrgBrandingTab } from '@/components/org-settings/tabs/org-branding';
 import { OrgWorkflowsTab } from '@/components/org-settings/tabs/org-workflows';
 import { OrgContactsTab } from '@/components/org-settings/tabs/org-contacts';
@@ -39,6 +40,7 @@ function OrgSettingsContent() {
   const renderTab = () => {
     switch (activeTab) {
       case 'members': return <OrgMembersTab />;
+      case 'structure': return <OrgStructureTab />;
       case 'branding': return <OrgBrandingTab />;
       case 'workflows': return <OrgWorkflowsTab />;
       case 'contacts': return <OrgContactsTab />;

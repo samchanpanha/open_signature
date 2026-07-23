@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { UserPlus, MoreVertical, Shield, Users, Trash2, Edit, Copy, Eye, Mail, Clock, CheckCircle, XCircle, AlertCircle, Activity, FileText, Download, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { orgApi, permissionsApi, activityApi, documentsApi, userPermissionsApi, expiringPermissionsApi, permissionExtensionApi, orgPermissionsApi, documentPermissionsApi, templatePermissionsApi, permissionTemplatesApi, type OrgMember, type ActivityLogEntry, type UserDocumentPermission, type UserTemplatePermission, type ExpiringPermission, type OrgPermission, type PermissionHistoryEntry, type PermissionTemplate } from '@/lib/api';
+import { orgApi, permissionsApi, activityApi, documentsApi, userPermissionsApi, expiringPermissionsApi, permissionExtensionApi, orgPermissionsApi, documentPermissionsApi, templatePermissionsApi, permissionTemplatesApi, branchesApi, departmentsApi, positionsApi, type OrgMember, type ActivityLogEntry, type UserDocumentPermission, type UserTemplatePermission, type ExpiringPermission, type OrgPermission, type PermissionHistoryEntry, type PermissionTemplate, type Branch, type Department, type Position } from '@/lib/api';
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; description: string; icon: React.ReactNode }> = {
   owner: { label: 'Owner', color: 'bg-purple-100 text-purple-800 border-purple-200', description: 'Full control', icon: <Shield className="w-3 h-3" /> },
@@ -51,10 +51,20 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
   const [invitePassword, setInvitePassword] = useState('');
   const [useCustomPassword, setUseCustomPassword] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteBranchId, setInviteBranchId] = useState('');
+  const [inviteDepartmentId, setInviteDepartmentId] = useState('');
+  const [invitePositionId, setInvitePositionId] = useState('');
 
   const [editRole, setEditRole] = useState('');
   const [editActive, setEditActive] = useState(true);
   const [editLoading, setEditLoading] = useState(false);
+  const [editBranchId, setEditBranchId] = useState('');
+  const [editDepartmentId, setEditDepartmentId] = useState('');
+  const [editPositionId, setEditPositionId] = useState('');
+
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [memberDocsDialogOpen, setMemberDocsDialogOpen] = useState(false);
   const [memberDocs, setMemberDocs] = useState<{ id: string; title: string; status: string }[]>([]);
   const [memberDocsLoading, setMemberDocsLoading] = useState(false);
@@ -158,6 +168,21 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
   };
 
   useEffect(() => { loadMembers(); }, [orgId]);
+  useEffect(() => {
+    const loadStructure = async () => {
+      try {
+        const [b, d, p] = await Promise.all([
+          branchesApi.list(orgId),
+          departmentsApi.list(orgId),
+          positionsApi.list(orgId),
+        ]);
+        setBranches(b);
+        setDepartments(d);
+        setPositions(p);
+      } catch { /* ok */ }
+    };
+    loadStructure();
+  }, [orgId]);
   useEffect(() => { if (activeTab === 'activity') loadActivities(); }, [activeTab, orgId]);
   useEffect(() => { if (activeTab === 'expiring') loadExpiringPermissions(); }, [activeTab]);
   useEffect(() => { if (activeTab === 'all-perms') loadOrgPermissions(); }, [activeTab]);
@@ -168,7 +193,7 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
     if (!inviteEmail.trim()) { toast.error('Email is required'); return; }
     setInviteLoading(true);
     try {
-      const result = await orgApi.inviteMember(orgId, inviteEmail.trim(), inviteRole, inviteName.trim() || undefined, useCustomPassword ? invitePassword : undefined);
+      const result = await orgApi.inviteMember(orgId, inviteEmail.trim(), inviteRole, inviteName.trim() || undefined, useCustomPassword ? invitePassword : undefined, inviteBranchId || undefined, inviteDepartmentId || undefined, invitePositionId || undefined);
       try { await orgApi.sendInviteNotification(orgId, result.id); } catch {}
       if (result.tempPassword) {
         setShowTempPassword(result.tempPassword);
@@ -176,7 +201,7 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
       } else {
         toast.success('Member invited successfully');
       }
-      setInviteName(''); setInviteEmail(''); setInviteRole('member'); setInvitePassword(''); setUseCustomPassword(false); setInviteDialogOpen(false);
+      setInviteName(''); setInviteEmail(''); setInviteRole('member'); setInvitePassword(''); setUseCustomPassword(false); setInviteBranchId(''); setInviteDepartmentId(''); setInvitePositionId(''); setInviteDialogOpen(false);
       loadMembers();
     } catch (error: any) { toast.error(error.message || 'Failed to invite member'); }
     finally { setInviteLoading(false); }
@@ -187,7 +212,12 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
     setEditLoading(true);
     try {
       await permissionsApi.applyRole(selectedMember.user.id, orgId, editRole);
-      if (editActive !== selectedMember.isActive) { await orgApi.updateMember(orgId, selectedMember.id, { isActive: editActive }); }
+      const updateData: { isActive?: boolean; branchId?: string | null; departmentId?: string | null; positionId?: string | null } = {};
+      if (editActive !== selectedMember.isActive) updateData.isActive = editActive;
+      updateData.branchId = editBranchId || null;
+      updateData.departmentId = editDepartmentId || null;
+      updateData.positionId = editPositionId || null;
+      await orgApi.updateMember(orgId, selectedMember.id, updateData);
       toast.success('Member updated successfully');
       setEditDialogOpen(false); setSelectedMember(null);
       loadMembers();
@@ -202,7 +232,11 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
   };
 
   const openEditDialog = (member: OrgMember) => {
-    setSelectedMember(member); setEditRole(member.role); setEditActive(member.isActive); setEditDialogOpen(true);
+    setSelectedMember(member); setEditRole(member.role); setEditActive(member.isActive);
+    setEditBranchId(member.branchId || '');
+    setEditDepartmentId(member.departmentId || '');
+    setEditPositionId(member.positionId || '');
+    setEditDialogOpen(true);
   };
 
   const openMemberDocs = async (member: OrgMember) => {
@@ -304,6 +338,39 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                         {useCustomPassword && <Input id="invite-password" type="password" placeholder="Min 6 characters" value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} />}
                         {!useCustomPassword && <p className="text-xs text-muted-foreground">A random password will be generated. You can share it with the member.</p>}
                       </div>
+                      {branches.length > 0 && (
+                        <div className="grid gap-2">
+                          <Label>Branch</Label>
+                          <Select value={inviteBranchId} onValueChange={setInviteBranchId}>
+                            <SelectTrigger><SelectValue placeholder="No branch (optional)" /></SelectTrigger>
+                            <SelectContent>
+                              {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {departments.length > 0 && (
+                        <div className="grid gap-2">
+                          <Label>Department</Label>
+                          <Select value={inviteDepartmentId} onValueChange={setInviteDepartmentId}>
+                            <SelectTrigger><SelectValue placeholder="No department (optional)" /></SelectTrigger>
+                            <SelectContent>
+                              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {positions.length > 0 && (
+                        <div className="grid gap-2">
+                          <Label>Position</Label>
+                          <Select value={invitePositionId} onValueChange={setInvitePositionId}>
+                            <SelectTrigger><SelectValue placeholder="No position (optional)" /></SelectTrigger>
+                            <SelectContent>
+                              {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.title}{p.level ? ` (${p.level})` : ''}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>Cancel</Button>
@@ -326,6 +393,9 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                     <TableRow>
                       <TableHead>Member</TableHead>
                       <TableHead>Role</TableHead>
+                      <TableHead>Branch</TableHead>
+                      <TableHead>Department</TableHead>
+                      <TableHead>Position</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Invited By</TableHead>
                       <TableHead>Last Login</TableHead>
@@ -352,6 +422,15 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
                             {ROLE_CONFIG[member.role]?.icon}
                             <span className="ml-1">{ROLE_CONFIG[member.role]?.label || member.role}</span>
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {member.branch ? <Badge variant="secondary">{member.branch.name}</Badge> : <span className="text-muted-foreground text-sm">-</span>}
+                        </TableCell>
+                        <TableCell>
+                          {member.department ? <Badge variant="secondary">{member.department.name}</Badge> : <span className="text-muted-foreground text-sm">-</span>}
+                        </TableCell>
+                        <TableCell>
+                          {member.position ? <Badge variant="secondary">{member.position.title}</Badge> : <span className="text-muted-foreground text-sm">-</span>}
                         </TableCell>
                         <TableCell>{getStatusBadge(member)}</TableCell>
                         <TableCell>
@@ -973,6 +1052,39 @@ export function TeamMemberManager({ orgId, currentUserId, currentUserRole }: Tea
               </div>
               <Switch checked={editActive} onCheckedChange={setEditActive} />
             </div>
+            {branches.length > 0 && (
+              <div className="grid gap-2">
+                <Label>Branch</Label>
+                <Select value={editBranchId} onValueChange={setEditBranchId}>
+                  <SelectTrigger><SelectValue placeholder="No branch" /></SelectTrigger>
+                  <SelectContent>
+                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {departments.length > 0 && (
+              <div className="grid gap-2">
+                <Label>Department</Label>
+                <Select value={editDepartmentId} onValueChange={setEditDepartmentId}>
+                  <SelectTrigger><SelectValue placeholder="No department" /></SelectTrigger>
+                  <SelectContent>
+                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {positions.length > 0 && (
+              <div className="grid gap-2">
+                <Label>Position</Label>
+                <Select value={editPositionId} onValueChange={setEditPositionId}>
+                  <SelectTrigger><SelectValue placeholder="No position" /></SelectTrigger>
+                  <SelectContent>
+                    {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.title}{p.level ? ` (${p.level})` : ''}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>

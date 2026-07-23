@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
         },
         edges: true,
         creator: { select: { id: true, email: true, name: true } },
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
         _count: { select: { documents: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -37,6 +39,10 @@ export async function GET(req: NextRequest) {
       isActive: w.isActive,
       createdBy: w.creator,
       documentCount: w._count.documents,
+      departmentId: w.departmentId,
+      positionId: w.positionId,
+      department: w.department,
+      position: w.position,
       steps: w.steps.map(s => ({
         id: s.id,
         name: s.name,
@@ -70,7 +76,7 @@ export async function POST(req: NextRequest) {
     const user = getAuthUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { name, description, orgId, steps, edges, layoutConfig } = await req.json();
+    const { name, description, orgId, steps, edges, layoutConfig, departmentId, positionId } = await req.json();
 
     if (!name?.trim()) return NextResponse.json({ error: 'Workflow name is required' }, { status: 400 });
     if (!orgId) return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
@@ -102,6 +108,8 @@ export async function POST(req: NextRequest) {
         orgId,
         createdBy: user.userId,
         layoutConfig: layoutConfig ? JSON.stringify(layoutConfig) : null,
+        departmentId: departmentId || null,
+        positionId: positionId || null,
         steps: {
           create: steps.map((s: any, i: number) => ({
             name: s.name || `Step ${i + 1}`,
@@ -154,6 +162,8 @@ export async function POST(req: NextRequest) {
       description: workflow.description,
       isActive: workflow.isActive,
       createdBy: workflow.creator,
+      departmentId: workflow.departmentId,
+      positionId: workflow.positionId,
       steps: workflow.steps.map(s => ({
         id: s.id,
         name: s.name,

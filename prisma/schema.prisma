@@ -33,6 +33,9 @@ model Organization {
   usageStats UsageStat[]
   permissionTemplates PermissionTemplate[]
   auditLogs AuditLog[]
+  branches Branch[]
+  departments Department[]
+  positions Position[]
 }
 
 model OrganizationMember {
@@ -47,10 +50,16 @@ model OrganizationMember {
   joinedAt      DateTime  @default(now())
   userId        String
   orgId         String
+  branchId      String?
+  departmentId  String?
+  positionId    String?
 
-  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  inviter User?       @relation("InvitedBy", fields: [invitedBy], references: [id])
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  inviter    User?        @relation("InvitedBy", fields: [invitedBy], references: [id])
+  branch     Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  department Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position   Position?    @relation(fields: [positionId], references: [id], onDelete: SetNull)
 
   @@unique([userId, orgId])
 }
@@ -376,6 +385,56 @@ model Permission {
   @@unique([userId, templateId, action])
 }
 
+model Branch {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?
+  description String?
+  isActive    Boolean  @default(true)
+  orgId       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org     Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members OrganizationMember[]
+
+  @@unique([orgId, name])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?
+  description String?
+  isActive    Boolean  @default(true)
+  orgId       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org      Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members  OrganizationMember[]
+  workflows SignatureWorkflow[]
+
+  @@unique([orgId, name])
+}
+
+model Position {
+  id          String   @id @default(cuid())
+  title       String
+  level       String?
+  description String?
+  isActive    Boolean  @default(true)
+  orgId       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org      Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members  OrganizationMember[]
+  workflows SignatureWorkflow[]
+
+  @@unique([orgId, title])
+}
+
 model DocumentPermission {
   id         String    @id @default(cuid())
   documentId String
@@ -461,14 +520,18 @@ model SignatureWorkflow {
   createdBy   String
   isActive    Boolean  @default(true)
   layoutConfig String? // JSON: canvas zoom, pan, etc.
+  departmentId String?
+  positionId   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  creator User        @relation(fields: [createdBy], references: [id])
-  steps   WorkflowStep[]
-  edges   WorkflowEdge[]
-  documents Document[]
+  org        Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator    User          @relation(fields: [createdBy], references: [id])
+  department Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position   Position?     @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  steps      WorkflowStep[]
+  edges      WorkflowEdge[]
+  documents  Document[]
 
   @@unique([orgId, name])
 }

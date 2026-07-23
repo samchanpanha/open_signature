@@ -15,7 +15,7 @@ import {
   X, Settings, Play, Pause, Eye, Workflow, LayoutGrid
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { workflowsApi, orgApi, type WorkflowListItem, type WorkflowDetail, type OrgMember } from '@/lib/api';
+import { workflowsApi, orgApi, branchesApi, departmentsApi, positionsApi, type WorkflowListItem, type WorkflowDetail, type OrgMember, type Branch, type Department, type Position } from '@/lib/api';
 import { WorkflowCanvas } from './workflow-canvas';
 
 interface WorkflowManagerProps {
@@ -26,6 +26,9 @@ interface WorkflowManagerProps {
 export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
   const [workflows, setWorkflows] = useState<WorkflowListItem[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -37,6 +40,8 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newSteps, setNewSteps] = useState<{ name: string; stepType: string; userId: string }[]>([]);
+  const [newDepartmentId, setNewDepartmentId] = useState('');
+  const [newPositionId, setNewPositionId] = useState('');
   const [creating, setCreating] = useState(false);
 
   const canManage = orgRole === 'owner' || orgRole === 'admin';
@@ -44,12 +49,18 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [wfList, memList] = await Promise.all([
+      const [wfList, memList, branchList, deptList, posList] = await Promise.all([
         workflowsApi.list(orgId),
         orgApi.listMembers(orgId),
+        branchesApi.list(orgId),
+        departmentsApi.list(orgId),
+        positionsApi.list(orgId),
       ]);
       setWorkflows(wfList);
       setMembers(memList);
+      setBranches(branchList);
+      setDepartments(deptList);
+      setPositions(posList);
     } catch (err: any) {
       toast.error(err.message || 'Failed to load workflows');
     } finally {
@@ -92,7 +103,9 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
         description: newDescription.trim() || undefined,
         orgId,
         steps: newSteps,
-      });
+        departmentId: newDepartmentId || undefined,
+        newPositionId: newPositionId || undefined,
+      } as any);
       toast.success('Workflow created!');
       setCreateOpen(false);
       resetForm();
@@ -130,6 +143,8 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
     setNewName('');
     setNewDescription('');
     setNewSteps([]);
+    setNewDepartmentId('');
+    setNewPositionId('');
   };
 
   const getMemberName = (userId: string) => {
@@ -278,6 +293,8 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                           <Badge variant={wf.isActive ? 'default' : 'secondary'}>
                             {wf.isActive ? 'Active' : 'Inactive'}
                           </Badge>
+                          {wf.department && <Badge variant="outline" className="bg-blue-50 text-blue-700">{wf.department.name}</Badge>}
+                          {wf.position && <Badge variant="outline" className="bg-purple-50 text-purple-700">{wf.position.title}</Badge>}
                           <Badge variant="outline">{wf.steps.length} steps</Badge>
                           <Badge variant="outline">{wf.documentCount} docs</Badge>
                         </div>
@@ -330,6 +347,41 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                   onChange={(e) => setNewDescription(e.target.value)}
                 />
               </div>
+              {(departments.length > 0 || positions.length > 0) && (
+                <>
+                  <Separator />
+                  <div>
+                    <Label className="text-sm font-medium">Auto-Assignment (Optional)</Label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Link this workflow to a department or position. It will auto-assign when members of that department/position create documents.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {departments.length > 0 && (
+                        <div className="grid gap-2">
+                          <Label className="text-xs">Department</Label>
+                          <Select value={newDepartmentId} onValueChange={setNewDepartmentId}>
+                            <SelectTrigger><SelectValue placeholder="No department (optional)" /></SelectTrigger>
+                            <SelectContent>
+                              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {positions.length > 0 && (
+                        <div className="grid gap-2">
+                          <Label className="text-xs">Position</Label>
+                          <Select value={newPositionId} onValueChange={setNewPositionId}>
+                            <SelectTrigger><SelectValue placeholder="No position (optional)" /></SelectTrigger>
+                            <SelectContent>
+                              {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.title}{p.level ? ` (${p.level})` : ''}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
               <Separator />
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -438,7 +490,15 @@ export function WorkflowManager({ orgId, orgRole }: WorkflowManagerProps) {
                     {selectedWorkflow.isActive ? 'Active' : 'Inactive'}
                   </Badge>
                 </DialogTitle>
-                <DialogDescription>{selectedWorkflow.description || 'No description'}</DialogDescription>
+                <DialogDescription className="flex items-center gap-2">
+                  {selectedWorkflow.description || 'No description'}
+                  {selectedWorkflow.department && (
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700">{selectedWorkflow.department.name}</Badge>
+                  )}
+                  {selectedWorkflow.position && (
+                    <Badge variant="outline" className="bg-purple-50 text-purple-700">{selectedWorkflow.position.title}</Badge>
+                  )}
+                </DialogDescription>
               </DialogHeader>
               <ScrollArea className="max-h-[50vh] pr-4">
                 <div className="space-y-4">

@@ -3,10 +3,10 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { orgApi, brandingApi, webhooksApi, emailTemplatesApi, apiKeysApi, type OrgDetail, type Webhook, type EmailTemplate, type ApiKey } from '@/lib/api';
+import { orgApi, brandingApi, webhooksApi, emailTemplatesApi, apiKeysApi, branchesApi, departmentsApi, positionsApi, type OrgDetail, type Webhook, type EmailTemplate, type ApiKey, type Branch, type Department, type Position } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 
-type OrgTab = 'members' | 'branding' | 'workflows' | 'contacts' | 'webhooks' | 'api-keys' | 'email-templates';
+type OrgTab = 'members' | 'structure' | 'branding' | 'workflows' | 'contacts' | 'webhooks' | 'api-keys' | 'email-templates';
 
 interface OrgSettingsContextType {
   orgId: string;
@@ -36,6 +36,14 @@ interface OrgSettingsContextType {
   setDeleteOrgConfirm: (v: boolean) => void;
   deletingOrg: boolean;
   deleteOrg: () => Promise<void>;
+
+  // Structure (Branches, Departments, Positions)
+  branches: Branch[];
+  departments: Department[];
+  positions: Position[];
+  loadBranches: () => Promise<void>;
+  loadDepartments: () => Promise<void>;
+  loadPositions: () => Promise<void>;
 
   // Webhooks
   webhooks: Webhook[];
@@ -100,6 +108,11 @@ export function OrgSettingsProvider({ children }: { children: ReactNode }) {
   // Webhooks
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
 
+  // Structure
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+
   // API Keys
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [showCreateKey, setShowCreateKey] = useState(false);
@@ -144,6 +157,27 @@ export function OrgSettingsProvider({ children }: { children: ReactNode }) {
     } catch { /* ok */ }
   }, [orgId]);
 
+  const loadBranches = useCallback(async () => {
+    try {
+      const data = await branchesApi.list(orgId);
+      setBranches(data);
+    } catch { /* ok */ }
+  }, [orgId]);
+
+  const loadDepartments = useCallback(async () => {
+    try {
+      const data = await departmentsApi.list(orgId);
+      setDepartments(data);
+    } catch { /* ok */ }
+  }, [orgId]);
+
+  const loadPositions = useCallback(async () => {
+    try {
+      const data = await positionsApi.list(orgId);
+      setPositions(data);
+    } catch { /* ok */ }
+  }, [orgId]);
+
   const loadApiKeys = useCallback(async () => {
     try {
       const keys = await apiKeysApi.list(orgId);
@@ -166,7 +200,10 @@ export function OrgSettingsProvider({ children }: { children: ReactNode }) {
     loadWebhooks();
     loadApiKeys();
     loadEmailTemplates();
-  }, [loadWebhooks, loadApiKeys, loadEmailTemplates, refreshKey]);
+    loadBranches();
+    loadDepartments();
+    loadPositions();
+  }, [loadWebhooks, loadApiKeys, loadEmailTemplates, loadBranches, loadDepartments, loadPositions, refreshKey]);
 
   const saveBranding = async () => {
     setBrandingSaving(true);
@@ -293,6 +330,7 @@ export function OrgSettingsProvider({ children }: { children: ReactNode }) {
       brandingForm, setBrandingForm, brandingSaving, saveBranding,
       inviteEmail, setInviteEmail, inviteRole, setInviteRole, inviting, inviteMember,
       updateMemberRole, removeMember, deleteOrgConfirm, setDeleteOrgConfirm, deletingOrg, deleteOrg,
+      branches, departments, positions, loadBranches, loadDepartments, loadPositions,
       webhooks, loadWebhooks,
       apiKeys, showCreateKey, setShowCreateKey, newKeyName, setNewKeyName,
       newKeyScopes, setNewKeyScopes, newKeyPlain, setNewKeyPlain, createApiKey, loadApiKeys,

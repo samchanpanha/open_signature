@@ -249,6 +249,47 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Auto-assign workflow based on creator's department/position
+    let assignedWorkflowId: string | null = null;
+    if (orgIdStr) {
+      const membership = await db.organizationMember.findFirst({
+        where: { orgId: orgIdStr, userId },
+        select: { departmentId: true, positionId: true },
+      });
+
+      if (membership && (membership.departmentId || membership.positionId)) {
+        // Find matching workflow: prefer exact match (both dept + position), then dept-only, then position-only
+        let matchedWorkflow: { id: string } | null = null;
+
+        if (membership.departmentId && membership.positionId) {
+          matchedWorkflow = await db.signatureWorkflow.findFirst({
+            where: { orgId: orgIdStr, isActive: true, departmentId: membership.departmentId, positionId: membership.positionId },
+            select: { id: true },
+          });
+        }
+        if (!matchedWorkflow && membership.departmentId) {
+          matchedWorkflow = await db.signatureWorkflow.findFirst({
+            where: { orgId: orgIdStr, isActive: true, departmentId: membership.departmentId, positionId: null },
+            select: { id: true },
+          });
+        }
+        if (!matchedWorkflow && membership.positionId) {
+          matchedWorkflow = await db.signatureWorkflow.findFirst({
+            where: { orgId: orgIdStr, isActive: true, departmentId: null, positionId: membership.positionId },
+            select: { id: true },
+          });
+        }
+
+        if (matchedWorkflow) {
+          await db.document.update({
+            where: { id: document.id },
+            data: { workflowId: matchedWorkflow.id },
+          });
+          assignedWorkflowId = matchedWorkflow.id;
+        }
+      }
+    }
+
     await db.auditLog.create({
       data: {
         action: 'DOCUMENT_CREATED',
@@ -268,6 +309,7 @@ export async function POST(req: NextRequest) {
       originalPdfPath: document.originalPdfPath,
       signedPdfPath: document.signedPdfPath,
       ownerId: document.ownerId,
+      workflowId: assignedWorkflowId,
       signers: [],
       fields: [],
     });

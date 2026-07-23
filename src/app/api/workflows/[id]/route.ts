@@ -19,6 +19,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         },
         edges: true,
         creator: { select: { id: true, email: true, name: true } },
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
         documents: {
           select: { id: true, title: true, status: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
@@ -36,6 +38,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       isActive: workflow.isActive,
       createdBy: workflow.creator,
       layoutConfig: workflow.layoutConfig ? JSON.parse(workflow.layoutConfig) : null,
+      departmentId: workflow.departmentId,
+      positionId: workflow.positionId,
+      department: workflow.department,
+      position: workflow.position,
       steps: workflow.steps.map(s => ({
         id: s.id,
         name: s.name,
@@ -81,7 +87,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Only owners and admins can update workflows' }, { status: 403 });
     }
 
-    const { name, description, isActive, steps, edges, layoutConfig } = body;
+    const { name, description, isActive, steps, edges, layoutConfig, departmentId, positionId } = body;
 
     // Update workflow basic info
     await db.signatureWorkflow.update({
@@ -91,6 +97,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(description !== undefined && { description: description?.trim() || null }),
         ...(isActive !== undefined && { isActive }),
         ...(layoutConfig !== undefined && { layoutConfig: JSON.stringify(layoutConfig) }),
+        ...(departmentId !== undefined && { departmentId: departmentId || null }),
+        ...(positionId !== undefined && { positionId: positionId || null }),
       },
     });
 
@@ -155,6 +163,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           orderBy: { order: 'asc' },
         },
         edges: true,
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
       },
     });
 
@@ -163,6 +173,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       name: updated!.name,
       description: updated!.description,
       isActive: updated!.isActive,
+      departmentId: updated!.departmentId,
+      positionId: updated!.positionId,
+      department: updated!.department,
+      position: updated!.position,
       steps: updated!.steps.map(s => ({
         id: s.id,
         name: s.name,

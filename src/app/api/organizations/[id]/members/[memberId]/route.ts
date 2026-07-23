@@ -13,7 +13,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { id: orgId, memberId } = await params;
     const userId = payload.userId as string;
-    const { role, isActive, inviteStatus } = await req.json();
+    const { role, isActive, inviteStatus, branchId, departmentId, positionId } = await req.json();
 
     // Check caller is owner or admin
     const callerMembership = await db.organizationMember.findFirst({
@@ -46,6 +46,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (inviteStatus !== undefined) {
       updateData.inviteStatus = inviteStatus;
     }
+    if (branchId !== undefined) {
+      updateData.branchId = branchId || null;
+    }
+    if (departmentId !== undefined) {
+      updateData.departmentId = departmentId || null;
+    }
+    if (positionId !== undefined) {
+      updateData.positionId = positionId || null;
+    }
 
     const updated = await db.organizationMember.update({
       where: { id: memberId },
@@ -53,6 +62,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       include: {
         user: { select: { id: true, email: true, name: true } },
         inviter: { select: { id: true, name: true, email: true } },
+        branch: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
       },
     });
 
@@ -66,6 +78,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       createdAt: updated.createdAt,
       user: updated.user,
       inviter: updated.inviter,
+      branch: updated.branch,
+      department: updated.department,
+      position: updated.position,
+      branchId: updated.branchId,
+      departmentId: updated.departmentId,
+      positionId: updated.positionId,
     });
   } catch (error) {
     console.error('Update member error:', error);

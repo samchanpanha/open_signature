@@ -8,13 +8,14 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import {
   Users, Palette, Workflow, Contact as ContactIcon, Send, Key, Mail,
-  ArrowLeft, Building2, ChevronRight,
+  ArrowLeft, Building2, ChevronRight, GitBranch,
 } from 'lucide-react';
 
-type OrgTab = 'members' | 'branding' | 'workflows' | 'contacts' | 'webhooks' | 'api-keys' | 'email-templates';
+type OrgTab = 'members' | 'structure' | 'branding' | 'workflows' | 'contacts' | 'webhooks' | 'api-keys' | 'email-templates';
 
 const NAV_ITEMS: { id: OrgTab; label: string; icon: React.ElementType; group: string }[] = [
   { id: 'members', label: 'Members', icon: Users, group: 'Management' },
+  { id: 'structure', label: 'Structure', icon: GitBranch, group: 'Management' },
   { id: 'branding', label: 'Branding', icon: Palette, group: 'Management' },
   { id: 'workflows', label: 'Workflows', icon: Workflow, group: 'Management' },
   { id: 'contacts', label: 'Contacts', icon: ContactIcon, group: 'Management' },

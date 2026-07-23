@@ -75,6 +75,42 @@ export interface OrgMember {
   inviter?: { id: string; name: string; email: string } | null;
   tempPassword?: string;
   isNewUser?: boolean;
+  branch?: { id: string; name: string } | null;
+  department?: { id: string; name: string } | null;
+  position?: { id: string; title: string; level?: string | null } | null;
+  branchId?: string | null;
+  departmentId?: string | null;
+  positionId?: string | null;
+}
+
+export interface Branch {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  isActive: boolean;
+  _count?: { members: number };
+  createdAt: string;
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  isActive: boolean;
+  _count?: { members: number; workflows: number };
+  createdAt: string;
+}
+
+export interface Position {
+  id: string;
+  title: string;
+  level: string | null;
+  description: string | null;
+  isActive: boolean;
+  _count?: { members: number; workflows: number };
+  createdAt: string;
 }
 
 export const orgApi = {
@@ -87,12 +123,12 @@ export const orgApi = {
     }),
   delete: (id: string) => request(`/api/organizations/${id}`, { method: 'DELETE' }),
   listMembers: (orgId: string) => request<OrgMember[]>(`/api/organizations/${orgId}/members`),
-  inviteMember: (orgId: string, email: string, role?: string, name?: string, password?: string) =>
+  inviteMember: (orgId: string, email: string, role?: string, name?: string, password?: string, branchId?: string, departmentId?: string, positionId?: string) =>
     request<OrgMember>(`/api/organizations/${orgId}/members`, {
       method: 'POST',
-      body: JSON.stringify({ email, role, name, password }),
+      body: JSON.stringify({ email, role, name, password, branchId, departmentId, positionId }),
     }),
-  updateMember: (orgId: string, memberId: string, data: { role?: string; isActive?: boolean; inviteStatus?: string }) =>
+  updateMember: (orgId: string, memberId: string, data: { role?: string; isActive?: boolean; inviteStatus?: string; branchId?: string | null; departmentId?: string | null; positionId?: string | null }) =>
     request<OrgMember>(`/api/organizations/${orgId}/members/${memberId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -371,6 +407,10 @@ export interface WorkflowListItem {
   createdBy: { id: string; email: string; name: string };
   documentCount: number;
   steps: WorkflowStep[];
+  departmentId?: string | null;
+  positionId?: string | null;
+  department?: { id: string; name: string } | null;
+  position?: { id: string; title: string; level?: string | null } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -384,12 +424,12 @@ export const workflowsApi = {
     request<WorkflowListItem[]>(`/api/workflows?orgId=${orgId}`),
   get: (id: string) =>
     request<WorkflowDetail>(`/api/workflows/${id}`),
-  create: (data: { name: string; description?: string; orgId: string; steps: { name: string; stepType: string; userId: string }[] }) =>
+  create: (data: { name: string; description?: string; orgId: string; steps: { name: string; stepType: string; userId: string }[]; departmentId?: string; positionId?: string }) =>
     request<WorkflowListItem>('/api/workflows', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  update: (id: string, data: { name?: string; description?: string; isActive?: boolean; steps?: { id?: string; name: string; stepType: string; userId?: string; x?: number; y?: number; config?: any; conditionRules?: any }[]; edges?: { source: string; target: string; label?: string; type?: string }[] }) =>
+  update: (id: string, data: { name?: string; description?: string; isActive?: boolean; departmentId?: string | null; positionId?: string | null; steps?: { id?: string; name: string; stepType: string; userId?: string; x?: number; y?: number; config?: any; conditionRules?: any }[]; edges?: { source: string; target: string; label?: string; type?: string }[] }) =>
     request<WorkflowListItem>(`/api/workflows/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -1047,4 +1087,61 @@ export const telegramApi = {
   getStats: () => request<TelegramStats>('/api/telegram/stats'),
   getDeepLink: (type: string, id: string) =>
     request<{ deepLink: string; bot: string }>(`/api/telegram/deeplink?type=${type}&id=${id}`),
+};
+
+// Branches
+export const branchesApi = {
+  list: (orgId: string) => request<Branch[]>(`/api/organizations/${orgId}/branches`),
+  create: (orgId: string, data: { name: string; code?: string; description?: string }) =>
+    request<Branch>(`/api/organizations/${orgId}/branches`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (orgId: string, branchId: string, data: { name?: string; code?: string; description?: string; isActive?: boolean }) =>
+    request<Branch>(`/api/organizations/${orgId}/branches/${branchId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (orgId: string, branchId: string) =>
+    request<{ success: boolean }>(`/api/organizations/${orgId}/branches/${branchId}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Departments
+export const departmentsApi = {
+  list: (orgId: string) => request<Department[]>(`/api/organizations/${orgId}/departments`),
+  create: (orgId: string, data: { name: string; code?: string; description?: string }) =>
+    request<Department>(`/api/organizations/${orgId}/departments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (orgId: string, departmentId: string, data: { name?: string; code?: string; description?: string; isActive?: boolean }) =>
+    request<Department>(`/api/organizations/${orgId}/departments/${departmentId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (orgId: string, departmentId: string) =>
+    request<{ success: boolean }>(`/api/organizations/${orgId}/departments/${departmentId}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Positions
+export const positionsApi = {
+  list: (orgId: string) => request<Position[]>(`/api/organizations/${orgId}/positions`),
+  create: (orgId: string, data: { title: string; level?: string; description?: string }) =>
+    request<Position>(`/api/organizations/${orgId}/positions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (orgId: string, positionId: string, data: { title?: string; level?: string; description?: string; isActive?: boolean }) =>
+    request<Position>(`/api/organizations/${orgId}/positions/${positionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (orgId: string, positionId: string) =>
+    request<{ success: boolean }>(`/api/organizations/${orgId}/positions/${positionId}`, {
+      method: 'DELETE',
+    }),
 };

@@ -27,6 +27,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: {
         user: { select: { id: true, email: true, name: true } },
         inviter: { select: { id: true, name: true, email: true } },
+        branch: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -41,6 +44,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       createdAt: m.createdAt,
       user: m.user,
       inviter: m.inviter,
+      branch: m.branch,
+      department: m.department,
+      position: m.position,
+      branchId: m.branchId,
+      departmentId: m.departmentId,
+      positionId: m.positionId,
     })));
   } catch (error) {
     console.error('List members error:', error);
@@ -56,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { id: orgId } = await params;
     const userId = payload.userId as string;
-    const { email, name, role = 'member', password } = await req.json();
+    const { email, name, role = 'member', password, branchId, departmentId, positionId } = await req.json();
 
     if (!email?.trim()) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
@@ -112,10 +121,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         role,
         inviteStatus: isNewUser ? 'pending' : 'active',
         invitedBy: userId,
+        branchId: branchId || null,
+        departmentId: departmentId || null,
+        positionId: positionId || null,
       },
       include: {
         user: { select: { id: true, email: true, name: true } },
         inviter: { select: { id: true, name: true, email: true } },
+        branch: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        position: { select: { id: true, title: true, level: true } },
       },
     });
 
@@ -128,8 +143,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       createdAt: member.createdAt,
       user: member.user,
       inviter: member.inviter,
+      branch: member.branch,
+      department: member.department,
+      position: member.position,
+      branchId: member.branchId,
+      departmentId: member.departmentId,
+      positionId: member.positionId,
       isNewUser,
-      // Note: temp password is sent via email, not returned in response for security
     }, { status: 201 });
   } catch (error) {
     console.error('Invite member error:', error);
